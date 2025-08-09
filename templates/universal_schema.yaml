@@ -1,0 +1,389 @@
+# MetaMan Universal Metadata Schema
+# This schema defines all possible metadata fields across AI image generation platforms
+# Last updated: 2025-08-08
+
+schema_version: "1.0.0"
+last_updated: "2025-08-08T00:00:00Z"
+description: "Universal metadata schema for AI image generation platforms"
+
+# Core metadata fields supported across platforms
+fields:
+  # Essential Generation Parameters
+  prompt:
+    type: string
+    description: "Positive prompt text used for image generation"
+    supported_by: ["automatic1111", "comfyui", "civitai", "forge", "tensor.ai", "seaart.ai", "leonardo.ai", "midjourney"]
+    required: true
+    max_length: 10000
+
+  negative_prompt:
+    type: string
+    description: "Negative prompt text to avoid certain features"
+    supported_by: ["automatic1111", "comfyui", "civitai", "forge", "tensor.ai", "seaart.ai"]
+    required: false
+    max_length: 5000
+
+  steps:
+    type: integer
+    description: "Number of diffusion/inference steps"
+    supported_by: ["automatic1111", "comfyui", "civitai", "forge", "tensor.ai", "seaart.ai", "leonardo.ai"]
+    range: [1, 150]
+    default: 20
+
+  cfg_scale:
+    type: float
+    description: "Classifier-free guidance scale"
+    supported_by: ["automatic1111", "comfyui", "civitai", "forge", "tensor.ai", "seaart.ai", "leonardo.ai"]
+    range: [1.0, 30.0]
+    default: 7.0
+
+  # Sampling Methods
+  sampler:
+    type: string
+    description: "Sampling/scheduler method used"
+    supported_by: ["automatic1111", "comfyui", "civitai", "forge", "tensor.ai", "seaart.ai"]
+    mappings:
+      automatic1111:
+        euler: "Euler"
+        euler_a: "Euler a"
+        heun: "Heun"
+        dpm2: "DPM2"
+        dpm2_a: "DPM2 a"
+        dpm_fast: "DPM fast"
+        dpm_adaptive: "DPM adaptive"
+        lms: "LMS"
+        plms: "PLMS"
+        ddim: "DDIM"
+        uni_pc: "UniPC"
+        dpmpp_2s_a: "DPM++ 2S a"
+        dpmpp_2m: "DPM++ 2M"
+        dpmpp_sde: "DPM++ SDE"
+        dpmpp_2m_karras: "DPM++ 2M Karras"
+        dpmpp_sde_karras: "DPM++ SDE Karras"
+        dpmpp_2s_a_karras: "DPM++ 2S a Karras"
+      comfyui:
+        euler: "euler"
+        euler_a: "euler_ancestral"
+        heun: "heun"
+        dpm2: "dpm_2"
+        dpm2_a: "dpm_2_ancestral"
+        lms: "lms"
+        ddim: "ddim"
+        uni_pc: "uni_pc"
+        dpmpp_2s_a: "dpmpp_2s_ancestral"
+        dpmpp_2m: "dpmpp_2m"
+        dpmpp_sde: "dpmpp_sde"
+        dpmpp_2m_karras: "dpmpp_2m"
+        dpmpp_sde_karras: "dpmpp_sde"
+
+  scheduler:
+    type: string
+    description: "Noise schedule type"
+    supported_by: ["comfyui", "forge", "tensor.ai"]
+    options: ["normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform"]
+    default: "normal"
+
+  # Random Seed
+  seed:
+    type: integer
+    description: "Random seed for reproducible generation"
+    supported_by: ["automatic1111", "comfyui", "civitai", "forge", "tensor.ai", "seaart.ai", "leonardo.ai"]
+    range: [0, 4294967295]
+
+  # Image Dimensions
+  width:
+    type: integer
+    description: "Generated image width in pixels"
+    supported_by: ["automatic1111", "comfyui", "civitai", "forge", "tensor.ai", "seaart.ai", "leonardo.ai"]
+    range: [64, 8192]
+    step: 8
+
+  height:
+    type: integer
+    description: "Generated image height in pixels"
+    supported_by: ["automatic1111", "comfyui", "civitai", "forge", "tensor.ai", "seaart.ai", "leonardo.ai"]
+    range: [64, 8192]
+    step: 8
+
+  # Model Information
+  model_name:
+    type: string
+    description: "Name of the base diffusion model"
+    supported_by: ["automatic1111", "comfyui", "civitai", "forge", "tensor.ai", "seaart.ai", "leonardo.ai"]
+    required: false
+
+  model_hash:
+    type: string
+    description: "SHA256 hash of the model file"
+    supported_by: ["automatic1111", "comfyui", "civitai", "forge"]
+    format: "hex"
+    length: 64
+
+  model_download_url:
+    type: string
+    description: "Direct download URL for the model"
+    supported_by: ["civitai", "huggingface", "tensor.ai"]
+    format: "url"
+
+  # LoRA (Low-Rank Adaptation) Models
+  loras:
+    type: array
+    description: "LoRA models applied during generation"
+    supported_by: ["automatic1111", "comfyui", "civitai", "forge", "tensor.ai"]
+    item_schema:
+      name:
+        type: string
+        description: "LoRA model name"
+      weight:
+        type: float
+        description: "LoRA application strength"
+        range: [-2.0, 2.0]
+        default: 1.0
+      hash:
+        type: string
+        description: "SHA256 hash of LoRA file"
+        format: "hex"
+      download_url:
+        type: string
+        description: "Download URL for LoRA"
+        format: "url"
+
+  # Textual Inversions/Embeddings
+  embeddings:
+    type: array
+    description: "Textual inversions/embeddings used"
+    supported_by: ["automatic1111", "comfyui", "civitai", "forge"]
+    item_schema:
+      name:
+        type: string
+        description: "Embedding name/trigger word"
+      hash:
+        type: string
+        description: "SHA256 hash of embedding file"
+        format: "hex"
+      download_url:
+        type: string
+        description: "Download URL for embedding"
+        format: "url"
+
+  # Advanced Parameters
+  clip_skip:
+    type: integer
+    description: "Number of CLIP layers to skip"
+    supported_by: ["automatic1111", "forge", "civitai"]
+    range: [1, 12]
+    default: 1
+
+  eta:
+    type: float
+    description: "Eta parameter for DDIM sampling"
+    supported_by: ["automatic1111", "forge"]
+    range: [0.0, 1.0]
+    default: 0.0
+
+  denoising_strength:
+    type: float
+    description: "Denoising strength for img2img operations"
+    supported_by: ["automatic1111", "comfyui", "forge", "tensor.ai"]
+    range: [0.0, 1.0]
+    default: 0.75
+
+  # VAE (Variational Autoencoder)
+  vae:
+    type: string
+    description: "VAE model used for encoding/decoding"
+    supported_by: ["automatic1111", "comfyui", "forge"]
+
+  # Upscaling
+  hires_fix:
+    type: boolean
+    description: "High-resolution fix enabled"
+    supported_by: ["automatic1111", "forge"]
+    default: false
+
+  hires_upscaler:
+    type: string
+    description: "Upscaler used for high-res fix"
+    supported_by: ["automatic1111", "forge"]
+
+  hires_steps:
+    type: integer
+    description: "Steps for high-res fix"
+    supported_by: ["automatic1111", "forge"]
+    range: [0, 150]
+
+  hires_denoising:
+    type: float
+    description: "Denoising strength for high-res fix"
+    supported_by: ["automatic1111", "forge"]
+    range: [0.0, 1.0]
+
+  # Service-Specific Fields
+  comfyui_workflow:
+    type: object
+    description: "Complete ComfyUI workflow JSON"
+    supported_by: ["comfyui"]
+
+  comfyui_prompt:
+    type: object
+    description: "ComfyUI prompt/queue data"
+    supported_by: ["comfyui"]
+
+  tensor_ai_style:
+    type: string
+    description: "Tensor.AI style preset identifier"
+    supported_by: ["tensor.ai"]
+
+  leonardo_preset:
+    type: string
+    description: "Leonardo.AI model preset"
+    supported_by: ["leonardo.ai"]
+
+  leonardo_guidance_scale:
+    type: float
+    description: "Leonardo.AI guidance scale"
+    supported_by: ["leonardo.ai"]
+    range: [1.0, 20.0]
+
+  midjourney_version:
+    type: string
+    description: "Midjourney model version"
+    supported_by: ["midjourney"]
+    options: ["v1", "v2", "v3", "v4", "v5", "v5.1", "v5.2", "v6"]
+
+  midjourney_stylize:
+    type: integer
+    description: "Midjourney stylization strength"
+    supported_by: ["midjourney"]
+    range: [0, 1000]
+
+  seaart_model:
+    type: string
+    description: "SeaArt.AI model identifier"
+    supported_by: ["seaart.ai"]
+
+  # Controlnet
+  controlnet:
+    type: array
+    description: "ControlNet models and settings"
+    supported_by: ["automatic1111", "comfyui", "forge"]
+    item_schema:
+      model:
+        type: string
+        description: "ControlNet model name"
+      weight:
+        type: float
+        description: "ControlNet influence strength"
+        range: [0.0, 2.0]
+      guidance_start:
+        type: float
+        description: "Start of ControlNet guidance"
+        range: [0.0, 1.0]
+      guidance_end:
+        type: float
+        description: "End of ControlNet guidance"
+        range: [0.0, 1.0]
+
+  # Metadata and Attribution
+  creation_time:
+    type: string
+    description: "ISO 8601 timestamp of image creation"
+    supported_by: ["automatic1111", "comfyui", "civitai", "forge", "tensor.ai", "seaart.ai", "leonardo.ai"]
+    format: "datetime"
+
+  source_service:
+    type: string
+    description: "Service that originally created the image"
+    supported_by: ["metaman"]
+    options: ["automatic1111", "comfyui", "civitai", "forge", "tensor.ai", "seaart.ai", "leonardo.ai", "midjourney", "generic"]
+
+  metaman_version:
+    type: string
+    description: "MetaMan version that processed this metadata"
+    supported_by: ["metaman"]
+    format: "semver"
+
+  batch_size:
+    type: integer
+    description: "Number of images generated in batch"
+    supported_by: ["automatic1111", "comfyui", "forge"]
+    range: [1, 100]
+    default: 1
+
+  batch_pos:
+    type: integer
+    description: "Position of this image in the batch"
+    supported_by: ["automatic1111", "comfyui", "forge"]
+    range: [1, 100]
+
+  # Face/Body Enhancement
+  face_restoration:
+    type: string
+    description: "Face restoration method used"
+    supported_by: ["automatic1111", "forge"]
+    options: ["CodeFormer", "GFPGAN"]
+
+  # Advanced Sampling
+  subseed:
+    type: integer
+    description: "Subseed for variation generation"
+    supported_by: ["automatic1111", "forge"]
+
+  subseed_strength:
+    type: float
+    description: "Subseed variation strength"
+    supported_by: ["automatic1111", "forge"]
+    range: [0.0, 1.0]
+
+  seed_resize_from_h:
+    type: integer
+    description: "Seed resize from height"
+    supported_by: ["automatic1111", "forge"]
+
+  seed_resize_from_w:
+    type: integer
+    description: "Seed resize from width"
+    supported_by: ["automatic1111", "forge"]
+
+# Service compatibility matrix
+service_compatibility:
+  automatic1111:
+    primary_format: "parameters_text"
+    chunk_name: "parameters"
+    encoding: "latin-1"
+    fallback_encoding: "utf-8"
+    supports_workflow: false
+    
+  comfyui:
+    primary_format: "json"
+    chunk_name: "workflow"
+    encoding: "utf-8"
+    supports_workflow: true
+    
+  civitai:
+    primary_format: "parameters_text"
+    chunk_name: "parameters"
+    encoding: "latin-1"
+    fallback_encoding: "utf-8"
+    supports_workflow: false
+    extended_format: "civt_chunk"
+    
+  forge:
+    primary_format: "parameters_text"
+    chunk_name: "parameters"
+    encoding: "latin-1"
+    fallback_encoding: "utf-8"
+    supports_workflow: false
+
+# Standard mappings for cross-platform compatibility
+standard_mappings:
+  samplers:
+    euler: ["Euler", "euler"]
+    euler_a: ["Euler a", "euler_ancestral"]
+    dpmpp_2m_karras: ["DPM++ 2M Karras", "dpmpp_2m"]
+    dpmpp_sde_karras: ["DPM++ SDE Karras", "dpmpp_sde"]
+  
+  schedulers:
+    karras: ["karras", "Karras"]
+    normal: ["normal", "Normal"]
+    exponential: ["exponential", "Exponential"]

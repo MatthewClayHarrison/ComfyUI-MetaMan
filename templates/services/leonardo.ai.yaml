@@ -1,0 +1,222 @@
+# Leonardo.AI Output Template
+# Defines how to format metadata for Leonardo.AI compatibility
+
+service_name: "leonardo.ai"
+output_format: "json"
+description: "Template for generating Leonardo.AI-compatible metadata"
+
+# Leonardo.AI uses a structured JSON format
+format_template: "json"
+
+# Leonardo.AI field mapping
+field_structure:
+  prompt:
+    required: true
+    type: "string"
+    max_length: 1000
+    field_name: "prompt"
+    
+  negative_prompt:
+    required: false
+    type: "string"
+    max_length: 500
+    field_name: "negative_prompt"
+    
+  width:
+    required: false
+    type: "integer"
+    options: [512, 640, 768, 832, 896, 1024, 1152, 1216, 1344, 1536]
+    default: 1024
+    
+  height:
+    required: false
+    type: "integer"
+    options: [512, 640, 768, 832, 896, 1024, 1152, 1216, 1344, 1536]
+    default: 1024
+    
+  steps:
+    required: false
+    type: "integer"
+    range: [10, 60]
+    default: 15
+    field_name: "num_inference_steps"
+    
+  cfg_scale:
+    required: false
+    type: "float"
+    range: [1.0, 20.0]
+    default: 7.0
+    field_name: "guidance_scale"
+    
+  seed:
+    required: false
+    type: "integer"
+    range: [0, 4294967295]
+
+# Leonardo.AI specific parameters
+leonardo_ai_fields:
+  preset:
+    type: "string"
+    description: "Leonardo.AI model preset"
+    field_name: "leonardo_preset"
+    options:
+      - "LEONARDO_CREATIVE"
+      - "LEONARDO_SELECT"
+      - "LEONARDO_SIGNATURE"
+      - "LEONARDO_VISION_XL"
+      - "STABLE_DIFFUSION_XL_1_0"
+      - "STABLE_DIFFUSION_2_1"
+      - "STABLE_DIFFUSION_1_5"
+    default: "LEONARDO_CREATIVE"
+    
+  style:
+    type: "string"
+    description: "Image style"
+    options:
+      - "CINEMATIC"
+      - "PHOTOGRAPHY"
+      - "DIGITAL_ART"
+      - "VINTAGE"
+      - "3D_RENDER"
+      - "PIXEL_ART"
+      - "FANTASY"
+      - "ANIME"
+    
+  lighting:
+    type: "string"
+    description: "Lighting style"
+    options:
+      - "NATURAL"
+      - "STUDIO"
+      - "DRAMATIC"
+      - "SOFT"
+      - "NEON"
+      - "CINEMATIC"
+    
+  contrast:
+    type: "string"
+    description: "Contrast level"
+    options: ["LOW", "MEDIUM", "HIGH"]
+    default: "MEDIUM"
+    
+  generation_mode:
+    type: "string"
+    description: "Generation mode"
+    options: ["FAST", "QUALITY"]
+    default: "QUALITY"
+    
+  public:
+    type: "boolean"
+    description: "Make generation public"
+    default: false
+    
+  nsfw:
+    type: "boolean"
+    description: "NSFW content allowed"
+    default: false
+
+# Model handling
+model_handling:
+  model_field: "modelId"
+  preset_mapping:
+    leonardo_creative: "LEONARDO_CREATIVE"
+    leonardo_select: "LEONARDO_SELECT"
+    leonardo_signature: "LEONARDO_SIGNATURE"
+    leonardo_vision_xl: "LEONARDO_VISION_XL"
+    sdxl: "STABLE_DIFFUSION_XL_1_0"
+    sd_2_1: "STABLE_DIFFUSION_2_1"
+    sd_1_5: "STABLE_DIFFUSION_1_5"
+
+# JSON output structure for Leonardo.AI
+json_structure:
+  prompt: "{prompt}"
+  negative_prompt: "{negative_prompt}"
+  modelId: "{leonardo_preset}"
+  width: "{width}"
+  height: "{height}"
+  num_images: 1
+  guidance_scale: "{cfg_scale}"
+  num_inference_steps: "{steps}"
+  seed: "{seed}"
+  
+  # Leonardo.AI specific parameters
+  generation_mode: "{generation_mode}"
+  public: "{public}"
+  nsfw: "{nsfw}"
+  
+  # Style parameters
+  leonardo_style: "{style}"
+  leonardo_lighting: "{lighting}"
+  leonardo_contrast: "{contrast}"
+  
+  # Metadata
+  metadata:
+    source_service: "leonardo.ai"
+    created_at: "{creation_time}"
+    metaman_version: "{metaman_version}"
+
+# PNG chunk configuration
+png_chunk:
+  chunk_name: "LeonardoAI"
+  encoding: "utf-8"
+  compress: true
+  format: "json"
+
+# Dimension validation for Leonardo.AI
+dimension_validation:
+  min_size: 512
+  max_size: 1536
+  valid_combinations:
+    - [512, 512]
+    - [640, 640]
+    - [768, 768]
+    - [832, 832]
+    - [896, 896]
+    - [1024, 1024]
+    - [1152, 1152]
+    - [1216, 1216]
+    - [1344, 1344]
+    - [1536, 1536]
+    # Landscape
+    - [1536, 640]
+    - [1344, 768]
+    - [1216, 832]
+    - [1152, 896]
+    - [1024, 1024]
+    # Portrait
+    - [640, 1536]
+    - [768, 1344]
+    - [832, 1216]
+    - [896, 1152]
+
+# Style and preset mappings
+style_mappings:
+  from_tags:
+    cinematic: "CINEMATIC"
+    photo: "PHOTOGRAPHY"
+    digital: "DIGITAL_ART"
+    vintage: "VINTAGE"
+    "3d": "3D_RENDER"
+    pixel: "PIXEL_ART"
+    fantasy: "FANTASY"
+    anime: "ANIME"
+
+# Validation rules
+validation:
+  required_fields: ["prompt"]
+  dimension_check: true
+  preset_validation: true
+  style_compatibility: true
+  
+# API integration hints
+api_integration:
+  base_url: "https://cloud.leonardo.ai/api/rest/v1"
+  endpoints:
+    generate: "/generations"
+    models: "/models"
+    user: "/me"
+  
+  # Rate limiting
+  rate_limits:
+    requests_per_minute: 30
+    generations_per_hour: 150
