@@ -14,9 +14,10 @@ MetaMan bridges the metadata gap between AI image generation services, enabling 
 ### Core Capabilities
 
 - **Universal Metadata Extraction**: Read metadata from any AI image generation service
-- **Cross-Platform Conversion**: Convert metadata between A1111, ComfyUI, Civitai, Tensor.AI, Leonardo.AI, and more
+- **Cross-Platform Workflow Generation**: Convert ANY platform's metadata into working ComfyUI workflows that recreate identical images
+- **Bidirectional Format Conversion**: Convert metadata between A1111, ComfyUI, Civitai, Tensor.AI, Leonardo.AI, and more
+- **Complex Workflow Preservation**: Save and restore complete ComfyUI node graphs with full fidelity
 - **Model Dependency Tracking**: Automatically identify and resolve model dependencies with download URLs
-- **Workflow Preservation**: Save and restore complete workflows across platforms
 - **Template-Based Extensibility**: Easy addition of new services via YAML templates
 
 ### Supported Platforms
@@ -59,6 +60,24 @@ MetaMan uses a comprehensive **universal metadata schema** that encompasses all 
 3. **Transforms** to target platform format using service-specific templates
 4. **Preserves** original workflows and enables cross-platform reproduction
 
+### Cross-Platform Workflow Conversion
+
+MetaMan enables true **cross-platform workflow migration** with two levels of fidelity:
+
+**✅ Simplified Workflow Generation**: 
+- Takes metadata from ANY platform (A1111, Civitai, Tensor.AI, etc.)
+- Generates a functional workflow that **recreates the exact same image**
+- Works for all platforms → ComfyUI conversion
+- Perfect for moving generations between platforms
+
+**✅ Complex Workflow Preservation**:
+- Preserves original ComfyUI node graphs with custom arrangements
+- Maintains advanced techniques, custom nodes, and complex routing
+- Only available for ComfyUI → ComfyUI workflows
+- Essential for sharing sophisticated ComfyUI creations
+
+**Example**: An A1111 image with LoRAs and specific sampling settings becomes a ComfyUI workflow with CheckpointLoader → LoraLoader → CLIPTextEncode → KSampler → VAEDecode that produces **identical output**.
+
 ### Template System
 
 The power of MetaMan lies in its **template-driven architecture**:
@@ -88,10 +107,26 @@ operation: "extract_universal"
 target_service: "automatic1111"
 # → Outputs: universal JSON + A1111 parameter string
 
-# Convert ComfyUI workflow to A1111 format  
+# Convert A1111 image to working ComfyUI workflow  
 operation: "convert_to_service"
+target_service: "comfyui"
+# → Generates functional ComfyUI workflow that recreates identical image
+```
+
+### Cross-Platform Workflow Migration
+
+```python
+# Take any A1111/Civitai image and create ComfyUI workflow
+input: A1111_image_with_metadata.png
+operation: "convert_to_service"
+target_service: "comfyui"
+# → Output: Complete ComfyUI workflow JSON that produces same result
+
+# Convert complex ComfyUI workflow to A1111 parameters
+input: ComfyUI_workflow_image.png
+operation: "convert_to_service" 
 target_service: "automatic1111"
-# → Generates A1111-compatible parameters
+# → Output: A1111-compatible parameter string (simplified but equivalent)
 ```
 
 ### Model Dependency Tracking
@@ -239,12 +274,15 @@ Service templates should include:
 | Feature | A1111 | ComfyUI | Civitai | Forge | Tensor.AI | Leonardo.AI |
 |---------|-------|---------|---------|--------|-----------|-------------|
 | Basic Parameters | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Workflow Data | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Simplified Workflow* | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Hashes | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ |
 | LoRA Support | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Complex Workflow Preservation | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Dependency URLs | ⚠️ | ⚠️ | ✅ | ⚠️ | ✅ | ✅ |
 
 ✅ Full Support | ⚠️ Partial Support | ❌ Not Supported
+
+**Simplified Workflow*: MetaMan can generate a functional workflow from any platform's metadata that will recreate the exact same image. Complex workflows get simplified to basic generation steps, but output quality and reproducibility are maintained.**
 
 ## 📄 License
 

@@ -13,13 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Universal schema supporting 60+ metadata fields across all major platforms
   - Template-driven architecture for easy platform extension
 
+- **Cross-Platform Workflow Generation**
+  - **Simplified Workflow Generation**: Convert ANY platform's metadata into working ComfyUI workflows that recreate identical images
+  - **Complex Workflow Preservation**: Full-fidelity preservation of ComfyUI node graphs and custom arrangements
+  - Bidirectional conversion between all supported platforms
+  - Perfect image reproduction across platform boundaries
+
 - **Platform Support**
-  - Automatic1111 (A1111) - Full parameter format support
+  - Automatic1111 (A1111) - Full parameter format support with ComfyUI workflow generation
   - ComfyUI - Complete workflow and prompt preservation
-  - Civitai - Enhanced resource tracking with model IDs
+  - Civitai - Enhanced resource tracking with model IDs and workflow generation
   - Forge - A1111-compatible with advanced sampling extensions
-  - Tensor.AI - JSON-based metadata format
-  - Leonardo.AI - Style and preset management system
+  - Tensor.AI - JSON-based metadata format with workflow generation
+  - Leonardo.AI - Style and preset management system with workflow generation
 
 - **ComfyUI Nodes**
   - **MetaMan Universal** - Primary metadata extraction and conversion

@@ -21,15 +21,26 @@ def test_imports():
         from PIL import Image, PngImagePlugin
         print("  ✅ Basic dependencies OK")
         
-        # Test MetaMan imports
-        from . import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
-        print("  ✅ MetaMan node mappings OK")
+        # Test MetaMan imports (using absolute imports for testing)
+        import sys
+        import os
         
-        from .metaman import MetaManUniversalNode
-        from .specialized_nodes import MetaManWorkflowSaver, MetaManDependencyResolver
-        from .metadata_parser import metadata_parser
-        from .api_integration import model_resolver
-        print("  ✅ MetaMan modules OK")
+        # Add current directory to path for testing
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+        
+        # Test importing MetaMan modules
+        import metaman
+        import specialized_nodes
+        import metadata_parser
+        import api_integration
+        print("  ✅ MetaMan modules imported OK")
+        
+        # Test node class availability
+        from metaman import MetaManUniversalNode
+        from specialized_nodes import MetaManWorkflowSaver, MetaManDependencyResolver
+        print("  ✅ MetaMan node classes OK")
         
         return True
         
@@ -98,8 +109,15 @@ def test_node_creation():
     print("Testing node creation...")
     
     try:
-        from .metaman import MetaManUniversalNode
-        from .specialized_nodes import MetaManWorkflowSaver, MetaManDependencyResolver
+        # Import with absolute imports
+        import sys
+        import os
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+            
+        from metaman import MetaManUniversalNode
+        from specialized_nodes import MetaManWorkflowSaver, MetaManDependencyResolver
         
         # Test node instantiation
         universal_node = MetaManUniversalNode()
@@ -127,7 +145,14 @@ def test_metadata_parsing():
     print("Testing metadata parsing...")
     
     try:
-        from .metadata_parser import metadata_parser
+        # Import with absolute imports
+        import sys
+        import os
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+            
+        from metadata_parser import metadata_parser
         
         # Test A1111 format parsing
         test_metadata = {
@@ -162,7 +187,14 @@ def test_api_integration():
     print("Testing API integration...")
     
     try:
-        from .api_integration import model_resolver, hash_verifier
+        # Import with absolute imports
+        import sys
+        import os
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+            
+        from api_integration import model_resolver, hash_verifier
         
         # Test resolver initialization
         if hasattr(model_resolver, 'find_model_sources'):
@@ -190,12 +222,19 @@ def run_validation():
     print("Running validation...")
     
     try:
-        from .validation import run_validation
+        # Import with absolute imports
+        import sys
+        import os
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if current_dir not in sys.path:
+            sys.path.insert(0, current_dir)
+            
+        from validation import run_validation as validation_func
         
         base_dir = Path(__file__).parent
         templates_dir = str(base_dir / "templates")
         
-        report = run_validation(templates_dir)
+        report = validation_func(templates_dir)
         print("  ✅ Validation completed")
         print("\nValidation Report:")
         print("-" * 50)
