@@ -6,7 +6,7 @@ Handles parsing of metadata from various AI image generation formats
 import json
 import re
 import base64
-from typing import Dict, List, Optional, Any, Union
+from typing import Optional, Any, Union
 from PIL import Image, PngImagePlugin
 import piexif
 from datetime import datetime
@@ -28,7 +28,7 @@ class MetadataParser:
             'generic': self._parse_generic_metadata
         }
     
-    def extract_all_metadata(self, image: Image.Image) -> Dict[str, Any]:
+    def extract_all_metadata(self, image: Image.Image) -> dict[str, Any]:
         """
         Extract all available metadata from an image
         Returns unified metadata structure
@@ -63,7 +63,7 @@ class MetadataParser:
         
         return metadata
     
-    def _detect_source_service(self, raw_metadata: Dict) -> tuple[str, float]:
+    def _detect_source_service(self, raw_metadata: dict) -> tuple[str, float]:
         """
         Detect which service generated the image based on metadata patterns
         Returns (service_name, confidence_score)
@@ -138,7 +138,7 @@ class MetadataParser:
         except:
             return False
     
-    def _extract_exif_data(self, image: Image.Image) -> Optional[Dict]:
+    def _extract_exif_data(self, image: Image.Image) -> Optional[dict]:
         """Extract EXIF data from image"""
         try:
             exif_dict = piexif.load(image.info.get('exif', b''))
@@ -152,7 +152,7 @@ class MetadataParser:
         except:
             return None
     
-    def _parse_a1111_parameters(self, raw_metadata: Dict) -> Dict:
+    def _parse_a1111_parameters(self, raw_metadata: dict) -> dict:
         """Parse Automatic1111 parameter format"""
         if 'parameters' not in raw_metadata:
             return {}
@@ -160,7 +160,7 @@ class MetadataParser:
         params_text = raw_metadata['parameters']
         return self._parse_a1111_text(params_text)
     
-    def _parse_a1111_text(self, params_text: str) -> Dict:
+    def _parse_a1111_text(self, params_text: str) -> dict:
         """Parse A1111 parameter text format"""
         metadata = {}
         lines = params_text.strip().split('\n')
@@ -189,7 +189,7 @@ class MetadataParser:
         
         return metadata
     
-    def _parse_parameter_line(self, line: str) -> Dict:
+    def _parse_parameter_line(self, line: str) -> dict:
         """Parse A1111 parameter line with key: value pairs"""
         params = {}
         
@@ -224,7 +224,7 @@ class MetadataParser:
         
         return params
     
-    def _smart_split(self, text: str, delimiter: str) -> List[str]:
+    def _smart_split(self, text: str, delimiter: str) -> list[str]:
         """Split text by delimiter, respecting quoted sections"""
         parts = []
         current = ""
@@ -273,7 +273,7 @@ class MetadataParser:
         # Return as string by default
         return value
     
-    def _parse_comfyui_metadata(self, raw_metadata: Dict) -> Dict:
+    def _parse_comfyui_metadata(self, raw_metadata: dict) -> dict:
         """Parse ComfyUI metadata format"""
         metadata = {}
         
@@ -307,7 +307,7 @@ class MetadataParser:
         
         return metadata
     
-    def _extract_params_from_comfyui_workflow(self, workflow: Dict) -> Dict:
+    def _extract_params_from_comfyui_workflow(self, workflow: dict) -> dict:
         """Extract generation parameters from ComfyUI workflow"""
         params = {}
         
@@ -348,7 +348,7 @@ class MetadataParser:
         
         return params
     
-    def _extract_params_from_comfyui_prompt(self, prompt_data: Dict) -> Dict:
+    def _extract_params_from_comfyui_prompt(self, prompt_data: dict) -> dict:
         """Extract parameters from ComfyUI prompt data"""
         params = {}
         
@@ -394,7 +394,7 @@ class MetadataParser:
         # Clean up None values
         return {k: v for k, v in params.items() if v is not None}
     
-    def _parse_civitai_metadata(self, raw_metadata: Dict) -> Dict:
+    def _parse_civitai_metadata(self, raw_metadata: dict) -> dict:
         """Parse Civitai metadata (extends A1111 format)"""
         metadata = self._parse_a1111_parameters(raw_metadata)
         
@@ -409,7 +409,7 @@ class MetadataParser:
         
         return metadata
     
-    def _parse_forge_parameters(self, raw_metadata: Dict) -> Dict:
+    def _parse_forge_parameters(self, raw_metadata: dict) -> dict:
         """Parse Forge metadata (extends A1111 format)"""
         metadata = self._parse_a1111_parameters(raw_metadata)
         
@@ -423,7 +423,7 @@ class MetadataParser:
         
         return metadata
     
-    def _parse_tensor_ai_metadata(self, raw_metadata: Dict) -> Dict:
+    def _parse_tensor_ai_metadata(self, raw_metadata: dict) -> dict:
         """Parse Tensor.AI metadata format"""
         metadata = {}
         
@@ -452,7 +452,7 @@ class MetadataParser:
         
         return metadata
     
-    def _parse_leonardo_metadata(self, raw_metadata: Dict) -> Dict:
+    def _parse_leonardo_metadata(self, raw_metadata: dict) -> dict:
         """Parse Leonardo.AI metadata format"""
         metadata = {}
         
@@ -476,7 +476,7 @@ class MetadataParser:
         
         return metadata
     
-    def _parse_generic_metadata(self, raw_metadata: Dict) -> Dict:
+    def _parse_generic_metadata(self, raw_metadata: dict) -> dict:
         """Parse generic/unknown metadata format"""
         metadata = {}
         

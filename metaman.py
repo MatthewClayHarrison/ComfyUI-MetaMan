@@ -14,7 +14,7 @@ import piexif
 import folder_paths
 import hashlib
 import re
-from typing import Dict, List, Optional, Any, Union
+from typing import Optional, Any, Union
 from datetime import datetime
 
 
@@ -63,7 +63,7 @@ class MetaManUniversalNode:
         self.universal_schema = self._load_universal_schema()
         self.service_templates = self._load_service_templates()
         
-    def _load_universal_schema(self) -> Dict:
+    def _load_universal_schema(self) -> dict:
         """Load the universal metadata schema"""
         try:
             if os.path.exists(self.schema_path):
@@ -75,7 +75,7 @@ class MetaManUniversalNode:
             print(f"MetaMan: Error loading schema: {e}")
             return self._create_default_schema()
     
-    def _create_default_schema(self) -> Dict:
+    def _create_default_schema(self) -> dict:
         """Create default universal schema"""
         return {
             "schema_version": "1.0.0",
@@ -250,7 +250,7 @@ class MetaManUniversalNode:
             }
         }
 
-    def _load_service_templates(self) -> Dict:
+    def _load_service_templates(self) -> dict:
         """Load service-specific output templates"""
         templates = {}
         if os.path.exists(self.templates_dir):
@@ -329,7 +329,7 @@ class MetaManUniversalNode:
             dependencies
         )
     
-    def _extract_source_metadata(self, image) -> Dict:
+    def _extract_source_metadata(self, image) -> dict:
         """Extract metadata from image regardless of source format"""
         metadata = {}
         
@@ -368,7 +368,7 @@ class MetaManUniversalNode:
         
         return metadata
     
-    def _parse_a1111_parameters(self, params_text: str) -> Dict:
+    def _parse_a1111_parameters(self, params_text: str) -> dict:
         """Parse A1111/Civitai parameters format"""
         metadata = {}
         lines = params_text.strip().split('\n')
@@ -390,7 +390,7 @@ class MetaManUniversalNode:
         
         return metadata
     
-    def _parse_parameter_line(self, line: str) -> Dict:
+    def _parse_parameter_line(self, line: str) -> dict:
         """Parse A1111 parameter line"""
         params = {}
         
@@ -434,7 +434,7 @@ class MetaManUniversalNode:
         
         return params
     
-    def _detect_source_service(self, metadata: Dict) -> str:
+    def _detect_source_service(self, metadata: dict) -> str:
         """Detect which service generated the image based on metadata"""
         if 'comfyui_workflow' in metadata:
             return 'comfyui'
@@ -449,7 +449,7 @@ class MetaManUniversalNode:
         else:
             return 'generic'
     
-    def _convert_to_universal(self, source_metadata: Dict, source_service: str) -> Dict:
+    def _convert_to_universal(self, source_metadata: dict, source_service: str) -> dict:
         """Convert source metadata to universal format"""
         universal = {
             "schema_version": self.universal_schema["schema_version"],
@@ -483,7 +483,7 @@ class MetaManUniversalNode:
         
         return universal
     
-    def _convert_from_universal(self, universal_metadata: Dict, target_service: str) -> str:
+    def _convert_from_universal(self, universal_metadata: dict, target_service: str) -> str:
         """Convert universal metadata to target service format"""
         if target_service not in self.SUPPORTED_SERVICES:
             return f"Unsupported target service: {target_service}"
@@ -494,7 +494,7 @@ class MetaManUniversalNode:
         else:
             return self._generate_default_format(universal_metadata, target_service)
     
-    def _apply_service_template(self, universal_metadata: Dict, target_service: str) -> str:
+    def _apply_service_template(self, universal_metadata: dict, target_service: str) -> str:
         """Apply service-specific template for output formatting"""
         template = self.service_templates[target_service]
         metadata = universal_metadata.get("metadata", {})
@@ -506,7 +506,7 @@ class MetaManUniversalNode:
         else:
             return json.dumps(metadata, indent=2)
     
-    def _format_a1111_output(self, metadata: Dict, template: Dict) -> str:
+    def _format_a1111_output(self, metadata: dict, template: dict) -> str:
         """Format metadata for A1111 compatibility"""
         lines = []
         
@@ -545,7 +545,7 @@ class MetaManUniversalNode:
         
         return "\n".join(lines)
     
-    def _format_comfyui_output(self, metadata: Dict, template: Dict) -> str:
+    def _format_comfyui_output(self, metadata: dict, template: dict) -> str:
         """Format metadata for ComfyUI compatibility"""
         # For ComfyUI, we primarily return the workflow if available
         if 'comfyui_workflow' in metadata:
@@ -569,7 +569,7 @@ class MetaManUniversalNode:
             
             return json.dumps(comfyui_meta, indent=2)
     
-    def _generate_default_format(self, universal_metadata: Dict, target_service: str) -> str:
+    def _generate_default_format(self, universal_metadata: dict, target_service: str) -> str:
         """Generate default format for services without specific templates"""
         metadata = universal_metadata.get("metadata", {})
         filtered = {}
@@ -583,7 +583,7 @@ class MetaManUniversalNode:
         
         return json.dumps(filtered, indent=2)
     
-    def _generate_dependency_list(self, universal_metadata: Dict) -> str:
+    def _generate_dependency_list(self, universal_metadata: dict) -> str:
         """Generate list of model dependencies with download URLs"""
         dependencies = []
         metadata = universal_metadata.get("metadata", {})
@@ -626,7 +626,7 @@ class MetaManUniversalNode:
         
         return json.dumps(dependencies, indent=2)
     
-    def _find_model_sources(self, name: str, hash_value: str) -> List[Dict]:
+    def _find_model_sources(self, name: str, hash_value: str) -> list[dict]:
         """Find download sources for a model (placeholder for API integration)"""
         sources = []
         
@@ -651,7 +651,7 @@ class MetaManUniversalNode:
         
         return sources
     
-    def _extract_workflow(self, image, source_service: str) -> Optional[Dict]:
+    def _extract_workflow(self, image, source_service: str) -> Optional[dict]:
         """Extract workflow information if available"""
         if hasattr(image, 'text') and image.text:
             if 'workflow' in image.text:
@@ -676,7 +676,7 @@ class MetaManUniversalNode:
         # Implementation for metadata export
         return (image, "Metadata export not yet implemented", "", "")
     
-    def _parse_exif_metadata(self, exif_data: Dict) -> Dict:
+    def _parse_exif_metadata(self, exif_data: dict) -> dict:
         """Parse EXIF data for AI generation information"""
         # Implementation for EXIF parsing
         return {}

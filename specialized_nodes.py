@@ -3,13 +3,25 @@ MetaMan Workflow Saver Node
 Specialized node for saving and embedding workflows in images
 """
 
-import torch
+try:
+    import torch
+except ImportError:
+    # Fallback for testing outside ComfyUI environment
+    torch = None
 import json
 import os
+from typing import Optional, Any, Union
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 from datetime import datetime
-import folder_paths
+try:
+    import folder_paths
+except ImportError:
+    # Fallback for testing outside ComfyUI environment
+    class folder_paths:
+        @staticmethod
+        def get_output_directory():
+            return os.getcwd()
 from .metadata_parser import metadata_parser
 
 
@@ -132,7 +144,7 @@ class MetaManWorkflowSaver:
             error_msg = f"MetaMan Workflow Saver Error: {str(e)}"
             return (image, error_msg, "")
     
-    def _extract_workflow_from_image(self, image: Image.Image) -> Dict:
+    def _extract_workflow_from_image(self, image: Image.Image) -> dict:
         """Extract existing workflow data from image"""
         extracted = metadata_parser.extract_all_metadata(image)
         
@@ -153,7 +165,7 @@ class MetaManWorkflowSaver:
         
         return workflow_data
     
-    def _embed_workflow_in_image(self, image: Image.Image, workflow_data: Dict, 
+    def _embed_workflow_in_image(self, image: Image.Image, workflow_data: dict, 
                                 include_metadata: bool, compress_data: bool, 
                                 preserve_original: bool) -> tuple[Image.Image, str]:
         """Embed workflow data into image PNG chunks"""
@@ -219,7 +231,7 @@ class MetaManWorkflowSaver:
         
         return result_image, info_message
     
-    def _save_workflow_json(self, workflow_data: Dict, file_path: str, include_metadata: bool) -> str:
+    def _save_workflow_json(self, workflow_data: dict, file_path: str, include_metadata: bool) -> str:
         """Save complete workflow data as JSON file"""
         
         output_data = {
@@ -243,7 +255,7 @@ class MetaManWorkflowSaver:
         
         return f"Saved complete workflow to {os.path.basename(file_path)}"
     
-    def _save_workflow_only(self, workflow_data: Dict, file_path: str) -> str:
+    def _save_workflow_only(self, workflow_data: dict, file_path: str) -> str:
         """Save only the workflow graph data"""
         
         if isinstance(workflow_data, dict) and 'workflow' in workflow_data:
@@ -265,7 +277,7 @@ class MetaManWorkflowSaver:
         
         return f"Saved workflow graph to {os.path.basename(file_path)}"
     
-    def _save_prompt_only(self, workflow_data: Dict, file_path: str) -> str:
+    def _save_prompt_only(self, workflow_data: dict, file_path: str) -> str:
         """Save only the prompt execution data"""
         
         if isinstance(workflow_data, dict) and 'prompt' in workflow_data:
@@ -389,7 +401,7 @@ class MetaManDependencyResolver:
             error_msg = f"MetaMan Dependency Resolver Error: {str(e)}"
             return (image, error_msg, "")
     
-    def _find_all_dependencies(self, metadata: Dict) -> List[Dict]:
+    def _find_all_dependencies(self, metadata: dict) -> list[dict]:
         """Find all model dependencies in metadata"""
         dependencies = []
         
@@ -456,7 +468,7 @@ class MetaManDependencyResolver:
         
         return dependencies
     
-    def _format_detailed_json(self, dependencies: List[Dict], include_confidence: bool) -> str:
+    def _format_detailed_json(self, dependencies: list[dict], include_confidence: bool) -> str:
         """Format as detailed JSON"""
         output = {
             'metaman_dependencies': {
@@ -476,7 +488,7 @@ class MetaManDependencyResolver:
         
         return json.dumps(output, indent=2, ensure_ascii=False)
     
-    def _format_download_urls(self, dependencies: List[Dict]) -> str:
+    def _format_download_urls(self, dependencies: list[dict]) -> str:
         """Format as simple download URL list"""
         urls = []
         
@@ -487,7 +499,7 @@ class MetaManDependencyResolver:
         
         return '\n'.join(urls) if urls else "No download URLs found"
     
-    def _format_summary_text(self, dependencies: List[Dict]) -> str:
+    def _format_summary_text(self, dependencies: list[dict]) -> str:
         """Format as human-readable summary"""
         lines = []
         lines.append("Model Dependencies Summary")
@@ -515,7 +527,7 @@ class MetaManDependencyResolver:
         
         return '\n'.join(lines)
     
-    def _format_dependency_list(self, dependencies: List[Dict]) -> str:
+    def _format_dependency_list(self, dependencies: list[dict]) -> str:
         """Format as simple dependency list"""
         lines = []
         
@@ -529,7 +541,7 @@ class MetaManDependencyResolver:
         
         return '\n'.join(lines)
     
-    def _generate_summary(self, dependencies: List[Dict]) -> str:
+    def _generate_summary(self, dependencies: list[dict]) -> str:
         """Generate a brief summary"""
         total = len(dependencies)
         found = len([d for d in dependencies if d.get('search_status') == 'found'])
@@ -554,15 +566,3 @@ class MetaManDependencyResolver:
             summary += f" ({', '.join(type_summaries)})"
         
         return summary
-
-
-# Node mappings for ComfyUI
-NODE_CLASS_MAPPINGS.update({
-    "MetaManWorkflowSaver": MetaManWorkflowSaver,
-    "MetaManDependencyResolver": MetaManDependencyResolver
-})
-
-NODE_DISPLAY_NAME_MAPPINGS.update({
-    "MetaManWorkflowSaver": "MetaMan Workflow Saver",
-    "MetaManDependencyResolver": "MetaMan Dependency Resolver"
-})
