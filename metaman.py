@@ -18,7 +18,7 @@ from typing import Optional, Any, Union
 from datetime import datetime
 
 
-class MetaManUniversalNode:
+class MetaManUniversalNodeV2:
     """
     Universal metadata management node for ComfyUI
     Handles metadata conversion between all major AI image generation services
@@ -757,9 +757,9 @@ class MetaManUniversalNode:
 
 # Node mappings for ComfyUI
 NODE_CLASS_MAPPINGS = {
-    "MetaManUniversalNode": MetaManUniversalNode
+    "MetaManUniversalNodeV2": MetaManUniversalNodeV2
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "MetaManUniversalNode": "MetaMan Universal"
+    "MetaManUniversalNodeV2": "MetaMan Universal V2"
 }
