@@ -40,7 +40,7 @@ class MetaManUniversalNode:
         }
     
     RETURN_TYPES = ("IMAGE", "STRING")
-    RETURN_NAMES = ("image", "metadata_json")
+    RETURN_NAMES = ("image_workflow", "json_workflow")
     FUNCTION = "process_metadata"
     CATEGORY = "MetaMan"
     DESCRIPTION = "Universal metadata conversion and embedding for AI image generation platforms"
