@@ -35,26 +35,15 @@ class MetaManUniversalNode:
         return {
             "required": {
                 "image": ("IMAGE",),
-                "operation": ([
-                    "extract_universal", "convert_to_service", "save_workflow", 
-                    "generate_dependencies", "export_metadata"
-                ], {"default": "extract_universal"}),
                 "target_service": (cls.SUPPORTED_SERVICES, {"default": "automatic1111"}),
-            },
-            "optional": {
-                "output_format": (["png_chunk", "json_file", "txt_file", "embed_in_image"], {"default": "png_chunk"}),
-                "template_override": ("STRING", {"default": ""}),
-                "include_workflow": ("BOOLEAN", {"default": True}),
-                "include_dependencies": ("BOOLEAN", {"default": True}),
-                "dependency_sources": (["civitai", "huggingface", "all"], {"default": "all"}),
             }
         }
     
-    RETURN_TYPES = ("IMAGE", "STRING", "STRING", "STRING")
-    RETURN_NAMES = ("image", "universal_metadata", "service_metadata", "dependencies")
-    FUNCTION = "process_universal_metadata"
+    RETURN_TYPES = ("IMAGE", "STRING")
+    RETURN_NAMES = ("image", "metadata_json")
+    FUNCTION = "process_metadata"
     CATEGORY = "MetaMan"
-    DESCRIPTION = "Universal metadata management across all AI image generation platforms"
+    DESCRIPTION = "Universal metadata conversion and embedding for AI image generation platforms"
 
     def __init__(self):
         """Initialize MetaMan with universal schema and service templates"""
@@ -265,12 +254,9 @@ class MetaManUniversalNode:
         
         return templates
 
-    def process_universal_metadata(self, image, operation, target_service, 
-                                 output_format="png_chunk", template_override="", 
-                                 include_workflow=True, include_dependencies=True,
-                                 dependency_sources="all"):
+    def process_metadata(self, image, target_service):
         """
-        Main processing function for universal metadata operations
+        Main processing function: extract metadata, convert to target service, and embed in image
         """
         try:
             # Convert tensor to PIL Image
@@ -281,53 +267,115 @@ class MetaManUniversalNode:
             else:
                 pil_image = image
             
-            # Process based on operation
-            if operation == "extract_universal":
-                return self._extract_to_universal(pil_image, target_service, include_workflow, include_dependencies)
-            elif operation == "convert_to_service":
-                return self._convert_to_service(pil_image, target_service, output_format, include_workflow)
-            elif operation == "save_workflow":
-                return self._save_workflow(pil_image, output_format)
-            elif operation == "generate_dependencies": 
-                return self._generate_dependencies(pil_image, dependency_sources)
-            elif operation == "export_metadata":
-                return self._export_metadata(pil_image, target_service, output_format)
-            else:
-                return (image, "Unknown operation", "", "")
-                
-        except Exception as e:
-            error_msg = f"MetaMan Error: {str(e)}"
-            return (image, error_msg, "", "")
-    
-    def _extract_to_universal(self, image, target_service, include_workflow, include_dependencies):
-        """Extract metadata from any source and convert to universal format"""
-        # Detect source service and extract metadata
-        source_metadata = self._extract_source_metadata(image)
-        source_service = self._detect_source_service(source_metadata)
-        
-        # Convert to universal format
-        universal_metadata = self._convert_to_universal(source_metadata, source_service)
-        
-        # Add workflow if requested and available
-        if include_workflow:
-            workflow = self._extract_workflow(image, source_service)
+            # Extract source metadata and detect service
+            source_metadata = self._extract_source_metadata(pil_image)
+            source_service = self._detect_source_service(source_metadata)
+            
+            # Convert to universal format
+            universal_metadata = self._convert_to_universal(source_metadata, source_service)
+            
+            # Add workflow extraction
+            workflow = self._extract_workflow(pil_image, source_service)
             if workflow:
                 universal_metadata["workflow"] = workflow
+            
+            # Generate dependencies using Civitai API
+            dependencies = self._generate_civitai_dependencies(universal_metadata)
+            if dependencies:
+                universal_metadata["dependencies"] = dependencies
+            
+            # Convert to target service format
+            target_metadata = self._convert_from_universal(universal_metadata, target_service)
+            
+            # Embed target service metadata in image
+            result_image = self._embed_metadata_in_image(pil_image, target_metadata, target_service)
+            
+            # Prepare JSON output with all metadata
+            json_output = {
+                "source_service": source_service,
+                "target_service": target_service,
+                "universal_metadata": universal_metadata,
+                "target_metadata": target_metadata,
+                "conversion_timestamp": datetime.now().isoformat()
+            }
+            
+            # Convert back to tensor if needed
+            if isinstance(image, torch.Tensor):
+                if isinstance(result_image, Image.Image):
+                    import numpy as np
+                    img_array = np.array(result_image).astype(np.float32) / 255.0
+                    output_tensor = torch.from_numpy(img_array).unsqueeze(0)
+                    return (output_tensor, json.dumps(json_output, indent=2))
+            
+            return (result_image, json.dumps(json_output, indent=2))
+            
+        except Exception as e:
+            error_msg = f"MetaMan Error: {str(e)}"
+            return (image, json.dumps({"error": error_msg}, indent=2))
+    
+    def _embed_metadata_in_image(self, image: Image.Image, metadata: str, target_service: str) -> Image.Image:
+        """
+        Embed target service metadata into image PNG chunks
+        """
+        # Create new image copy
+        result_image = image.copy() if hasattr(image, 'copy') else image
         
-        # Generate dependencies if requested
-        dependencies = ""
-        if include_dependencies:
-            dependencies = self._generate_dependency_list(universal_metadata)
+        # Prepare PNG info
+        png_info = PngInfo()
         
-        # Convert to target service format
-        service_metadata = self._convert_from_universal(universal_metadata, target_service)
+        # Copy existing metadata
+        if hasattr(image, 'text') and image.text:
+            for key, value in image.text.items():
+                png_info.add_text(key, value)
         
-        return (
-            image,
-            json.dumps(universal_metadata, indent=2),
-            service_metadata,
-            dependencies
-        )
+        # Add target service metadata
+        if target_service == "automatic1111" or target_service == "civitai":
+            # A1111/Civitai uses 'parameters' chunk
+            png_info.add_text("parameters", metadata)
+        elif target_service == "comfyui":
+            # ComfyUI uses 'workflow' and 'prompt' chunks
+            try:
+                # If metadata is JSON, try to extract workflow/prompt
+                if metadata.startswith('{'):
+                    data = json.loads(metadata)
+                    if 'comfyui_workflow' in data:
+                        png_info.add_text("workflow", json.dumps(data['comfyui_workflow']))
+                    if 'comfyui_prompt' in data:
+                        png_info.add_text("prompt", json.dumps(data['comfyui_prompt']))
+                else:
+                    # Fallback: add as workflow
+                    png_info.add_text("workflow", metadata)
+            except:
+                png_info.add_text("workflow", metadata)
+        else:
+            # For other services, use service name as chunk name
+            chunk_name = target_service.replace('.', '_')
+            png_info.add_text(chunk_name, metadata)
+        
+        # Add MetaMan universal chunk
+        metaman_data = {
+            'schema_version': '1.0.0',
+            'created_at': datetime.now().isoformat(),
+            'metaman_version': '1.0.0',
+            'target_service': target_service,
+            'original_metadata': metadata
+        }
+        png_info.add_text("meta", json.dumps(metaman_data, separators=(',', ':')))
+        
+        # Save to temporary location to embed metadata
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+            result_image.save(tmp_file, "PNG", pnginfo=png_info)
+            tmp_file.flush()
+            
+            # Reload image with embedded metadata
+            result_image = Image.open(tmp_file.name)
+            result_image.load()  # Ensure image is fully loaded
+            
+            # Clean up temp file
+            os.unlink(tmp_file.name)
+        
+        return result_image
     
     def _extract_source_metadata(self, image) -> dict:
         """Extract metadata from image regardless of source format"""
@@ -583,73 +631,111 @@ class MetaManUniversalNode:
         
         return json.dumps(filtered, indent=2)
     
-    def _generate_dependency_list(self, universal_metadata: dict) -> str:
-        """Generate list of model dependencies with download URLs"""
+    def _generate_civitai_dependencies(self, universal_metadata: dict) -> list[dict]:
+        """
+        Generate model dependencies using Civitai API
+        """
         dependencies = []
         metadata = universal_metadata.get("metadata", {})
         
         # Main model
-        if 'model_name' in metadata:
-            dep = {
-                "type": "checkpoint",
-                "name": metadata['model_name'],
-                "hash": metadata.get('model_hash', ''),
-                "download_url": metadata.get('model_download_url', ''),
-                "sources": self._find_model_sources(metadata.get('model_name', ''), metadata.get('model_hash', ''))
-            }
-            dependencies.append(dep)
+        if 'model_name' in metadata and metadata['model_name']:
+            dep = self._search_civitai_model(metadata['model_name'], 'checkpoint', metadata.get('model_hash', ''))
+            if dep:
+                dependencies.append(dep)
         
         # LoRAs
         if 'loras' in metadata and isinstance(metadata['loras'], list):
             for lora in metadata['loras']:
-                dep = {
-                    "type": "lora",
-                    "name": lora.get('name', ''),
-                    "weight": lora.get('weight', 1.0),
-                    "hash": lora.get('hash', ''),
-                    "download_url": lora.get('download_url', ''),
-                    "sources": self._find_model_sources(lora.get('name', ''), lora.get('hash', ''))
-                }
-                dependencies.append(dep)
+                if isinstance(lora, dict) and lora.get('name'):
+                    dep = self._search_civitai_model(lora['name'], 'lora', lora.get('hash', ''), lora.get('weight', 1.0))
+                    if dep:
+                        dependencies.append(dep)
         
         # Embeddings
         if 'embeddings' in metadata and isinstance(metadata['embeddings'], list):
             for embedding in metadata['embeddings']:
-                dep = {
-                    "type": "embedding",
-                    "name": embedding.get('name', ''),
-                    "hash": embedding.get('hash', ''),
-                    "download_url": embedding.get('download_url', ''),
-                    "sources": self._find_model_sources(embedding.get('name', ''), embedding.get('hash', ''))
-                }
-                dependencies.append(dep)
+                if isinstance(embedding, dict) and embedding.get('name'):
+                    dep = self._search_civitai_model(embedding['name'], 'embedding', embedding.get('hash', ''))
+                    if dep:
+                        dependencies.append(dep)
         
-        return json.dumps(dependencies, indent=2)
+        return dependencies
     
-    def _find_model_sources(self, name: str, hash_value: str) -> list[dict]:
-        """Find download sources for a model (placeholder for API integration)"""
-        sources = []
-        
-        # TODO: Implement actual API calls to Civitai, HuggingFace, etc.
-        # This would search by name and/or hash to find download URLs
-        
-        # Civitai search (placeholder)
-        if name:
-            sources.append({
-                "platform": "civitai",
-                "search_url": f"https://civitai.com/api/v1/models?query={name}",
-                "confidence": "medium"
-            })
-        
-        # HuggingFace search (placeholder) 
-        if name:
-            sources.append({
-                "platform": "huggingface",
-                "search_url": f"https://huggingface.co/models?search={name}",
-                "confidence": "medium"
-            })
-        
-        return sources
+    def _search_civitai_model(self, name: str, model_type: str, hash_value: str = '', weight: float = None) -> Optional[dict]:
+        """
+        Search for a model on Civitai API
+        """
+        try:
+            import requests
+            import time
+            
+            # Rate limiting
+            time.sleep(0.5)
+            
+            # Search by name first
+            search_url = f"https://civitai.com/api/v1/models?query={name}&limit=5"
+            
+            response = requests.get(search_url, timeout=10)
+            if response.status_code != 200:
+                return None
+            
+            data = response.json()
+            items = data.get('items', [])
+            
+            if not items:
+                return None
+            
+            # Find best match
+            best_match = None
+            for item in items:
+                # Check if name matches (case insensitive)
+                if name.lower() in item.get('name', '').lower():
+                    # If we have a hash, try to match it
+                    if hash_value:
+                        for version in item.get('modelVersions', []):
+                            for file in version.get('files', []):
+                                if file.get('hashes', {}).get('SHA256', '').startswith(hash_value[:10]):
+                                    best_match = item
+                                    break
+                            if best_match:
+                                break
+                    else:
+                        best_match = item
+                        break
+            
+            if not best_match:
+                best_match = items[0]  # Fallback to first result
+            
+            # Extract information
+            model_info = {
+                'type': model_type,
+                'name': name,
+                'civitai_id': best_match.get('id'),
+                'civitai_name': best_match.get('name'),
+                'creator': best_match.get('creator', {}).get('username', ''),
+                'download_url': '',
+                'hash': hash_value,
+                'confidence': 0.8 if hash_value else 0.6
+            }
+            
+            if weight is not None:
+                model_info['weight'] = weight
+            
+            # Get download URL from latest version
+            versions = best_match.get('modelVersions', [])
+            if versions:
+                latest_version = versions[0]
+                files = latest_version.get('files', [])
+                if files:
+                    model_info['download_url'] = files[0].get('downloadUrl', '')
+                    model_info['civitai_version_id'] = latest_version.get('id')
+            
+            return model_info
+            
+        except Exception as e:
+            print(f"MetaMan: Error searching Civitai for {name}: {e}")
+            return None
     
     def _extract_workflow(self, image, source_service: str) -> Optional[dict]:
         """Extract workflow information if available"""
@@ -661,20 +747,7 @@ class MetaManUniversalNode:
                     pass
         return None
     
-    def _save_workflow(self, image, output_format: str):
-        """Save workflow as file or embed in image"""
-        # Implementation for workflow saving
-        return (image, "Workflow save not yet implemented", "", "")
-    
-    def _generate_dependencies(self, image, dependency_sources: str):
-        """Generate dependency information"""
-        # Implementation for dependency generation
-        return (image, "Dependency generation not yet implemented", "", "")
-    
-    def _export_metadata(self, image, target_service: str, output_format: str):
-        """Export metadata in specified format"""
-        # Implementation for metadata export
-        return (image, "Metadata export not yet implemented", "", "")
+
     
     def _parse_exif_metadata(self, exif_data: dict) -> dict:
         """Parse EXIF data for AI generation information"""
