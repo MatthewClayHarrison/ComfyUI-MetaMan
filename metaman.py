@@ -381,39 +381,62 @@ class MetaManUniversalNodeV2:
         """Extract metadata from image regardless of source format"""
         metadata = {}
         
+        print(f"MetaMan Debug: Starting metadata extraction...")
+        
         # Check PNG text chunks
         if hasattr(image, 'text') and image.text:
+            print(f"MetaMan Debug: Found PNG text chunks: {list(image.text.keys())}")
+            
             # A1111/Civitai parameters format
             if 'parameters' in image.text:
+                print(f"MetaMan Debug: Found 'parameters' chunk")
                 metadata.update(self._parse_a1111_parameters(image.text['parameters']))
             
             # ComfyUI workflow format  
             if 'workflow' in image.text:
+                print(f"MetaMan Debug: Found 'workflow' chunk")
                 try:
-                    metadata['comfyui_workflow'] = json.loads(image.text['workflow'])
-                except:
-                    pass
+                    workflow_data = json.loads(image.text['workflow'])
+                    metadata['comfyui_workflow'] = workflow_data
+                    print(f"MetaMan Debug: Successfully parsed workflow with {len(workflow_data.get('nodes', []))} nodes")
+                except Exception as e:
+                    print(f"MetaMan Debug: Error parsing workflow: {e}")
             
             # ComfyUI prompt format
             if 'prompt' in image.text:
+                print(f"MetaMan Debug: Found 'prompt' chunk")
                 try:
-                    metadata['comfyui_prompt'] = json.loads(image.text['prompt'])
-                except:
-                    pass
+                    prompt_data = json.loads(image.text['prompt'])
+                    metadata['comfyui_prompt'] = prompt_data
+                    print(f"MetaMan Debug: Successfully parsed prompt with {len(prompt_data)} nodes")
+                    
+                    # Extract basic parameters from prompt data immediately
+                    extracted_params = self._extract_params_from_comfyui_prompt(prompt_data)
+                    metadata.update(extracted_params)
+                    print(f"MetaMan Debug: Extracted params from prompt: {list(extracted_params.keys())}")
+                except Exception as e:
+                    print(f"MetaMan Debug: Error parsing prompt: {e}")
             
             # Custom "meta" chunk (our universal format)
             if 'meta' in image.text:
+                print(f"MetaMan Debug: Found 'meta' chunk")
                 try:
-                    metadata.update(json.loads(image.text['meta']))
-                except:
-                    pass
+                    meta_data = json.loads(image.text['meta'])
+                    metadata.update(meta_data)
+                except Exception as e:
+                    print(f"MetaMan Debug: Error parsing meta chunk: {e}")
+        else:
+            print(f"MetaMan Debug: No PNG text chunks found or image.text is empty")
         
         # Check EXIF data
         if hasattr(image, '_getexif') and image._getexif():
+            print(f"MetaMan Debug: Found EXIF data")
             exif_data = image._getexif()
-            # Look for AI generation data in EXIF
             metadata.update(self._parse_exif_metadata(exif_data))
+        else:
+            print(f"MetaMan Debug: No EXIF data found")
         
+        print(f"MetaMan Debug: Final extracted metadata keys: {list(metadata.keys())}")
         return metadata
     
     def _parse_a1111_parameters(self, params_text: str) -> dict:
@@ -484,21 +507,54 @@ class MetaManUniversalNodeV2:
     
     def _detect_source_service(self, metadata: dict) -> str:
         """Detect which service generated the image based on metadata"""
-        if 'comfyui_workflow' in metadata:
+        print(f"MetaMan Debug: Detecting service for metadata keys: {list(metadata.keys())}")
+        
+        # ComfyUI indicators (check multiple possible indicators)
+        comfyui_indicators = [
+            'comfyui_workflow' in metadata,
+            'comfyui_prompt' in metadata,
+            'workflow' in metadata,  # Raw workflow chunk
+            'prompt' in metadata and isinstance(metadata.get('prompt'), dict),  # ComfyUI prompt dict
+            any(key.startswith('comfyui_') for key in metadata.keys()),
+            # Check if we have typical ComfyUI node data
+            any(isinstance(value, dict) and 'class_type' in str(value) for value in metadata.values())
+        ]
+        
+        if any(comfyui_indicators):
+            print(f"MetaMan Debug: Detected ComfyUI service (indicators: {comfyui_indicators})")
             return 'comfyui'
+        
+        # A1111/Civitai indicators
         elif 'model_hash' in metadata and 'sampler' in metadata:
+            print(f"MetaMan Debug: Detected A1111/Civitai service")
             return 'automatic1111'
+        
+        # Other services
         elif 'tensor_ai_style' in metadata:
+            print(f"MetaMan Debug: Detected Tensor.AI service")
             return 'tensor.ai'
         elif 'leonardo_preset' in metadata:
+            print(f"MetaMan Debug: Detected Leonardo.AI service")
             return 'leonardo.ai'
         elif 'midjourney_version' in metadata:
+            print(f"MetaMan Debug: Detected Midjourney service")
             return 'midjourney'
-        else:
-            return 'generic'
+        
+        # If we have basic generation params, try to infer
+        elif 'prompt' in metadata and isinstance(metadata['prompt'], str):
+            # Check for A1111-style parameters
+            if any(key in metadata for key in ['steps', 'cfg_scale', 'seed']):
+                print(f"MetaMan Debug: Detected generic A1111-style metadata")
+                return 'automatic1111'
+        
+        print(f"MetaMan Debug: Could not detect service, using generic")
+        return 'generic'
     
     def _convert_to_universal(self, source_metadata: dict, source_service: str) -> dict:
         """Convert source metadata to universal format"""
+        print(f"MetaMan Debug: Converting to universal format from {source_service}")
+        print(f"MetaMan Debug: Source metadata keys: {list(source_metadata.keys())}")
+        
         universal = {
             "schema_version": self.universal_schema["schema_version"],
             "source_service": source_service,
@@ -507,12 +563,21 @@ class MetaManUniversalNodeV2:
             "metadata": {}
         }
         
-        # Map source fields to universal schema
+        # First, copy all source metadata directly
+        for key, value in source_metadata.items():
+            universal["metadata"][key] = value
+            print(f"MetaMan Debug: Copied direct field {key}: {type(value)}")
+        
+        # Then map source fields to universal schema (for compatibility)
+        mapped_count = 0
         for field_name, field_config in self.universal_schema["fields"].items():
             if source_service in field_config.get("supported_by", []):
                 # Direct mapping
                 if field_name in source_metadata:
-                    universal["metadata"][field_name] = source_metadata[field_name]
+                    if field_name not in universal["metadata"]:
+                        universal["metadata"][field_name] = source_metadata[field_name]
+                        mapped_count += 1
+                        print(f"MetaMan Debug: Mapped schema field {field_name}")
                 # Handle mappings
                 elif "mappings" in field_config and source_service in field_config["mappings"]:
                     source_value = source_metadata.get(field_name)
@@ -523,11 +588,20 @@ class MetaManUniversalNodeV2:
                             for universal_val, source_val in mapping.items():
                                 if source_val == source_value:
                                     universal["metadata"][field_name] = universal_val
+                                    mapped_count += 1
+                                    print(f"MetaMan Debug: Mapped via schema {field_name}: {source_val} -> {universal_val}")
                                     break
                             else:
                                 universal["metadata"][field_name] = source_value
+                                mapped_count += 1
+                                print(f"MetaMan Debug: Mapped direct {field_name}: {source_value}")
                         else:
                             universal["metadata"][field_name] = source_value
+                            mapped_count += 1
+                            print(f"MetaMan Debug: Mapped simple {field_name}: {source_value}")
+        
+        print(f"MetaMan Debug: Universal conversion complete. {len(universal['metadata'])} total fields, {mapped_count} schema-mapped")
+        print(f"MetaMan Debug: Final universal metadata keys: {list(universal['metadata'].keys())}")
         
         return universal
     
@@ -556,15 +630,20 @@ class MetaManUniversalNodeV2:
     
     def _format_a1111_output(self, metadata: dict, template: dict) -> str:
         """Format metadata for A1111 compatibility"""
+        print(f"MetaMan Debug: Formatting A1111 output from metadata: {list(metadata.keys())}")
         lines = []
         
         # Positive prompt
         if 'prompt' in metadata:
             lines.append(metadata['prompt'])
+            print(f"MetaMan Debug: Added prompt: {metadata['prompt'][:100]}...")
+        else:
+            print(f"MetaMan Debug: No prompt found in metadata")
         
         # Negative prompt
         if 'negative_prompt' in metadata:
             lines.append(f"Negative prompt: {metadata['negative_prompt']}")
+            print(f"MetaMan Debug: Added negative prompt: {metadata['negative_prompt'][:100]}...")
         
         # Parameters line
         params = []
@@ -573,8 +652,11 @@ class MetaManUniversalNodeV2:
             "model_hash", "clip_skip", "denoising_strength"
         ])
         
+        print(f"MetaMan Debug: Processing parameters in order: {param_order}")
+        
         for param in param_order:
             if param in metadata and metadata[param] is not None:
+                print(f"MetaMan Debug: Found parameter {param}: {metadata[param]}")
                 if param == "cfg_scale":
                     params.append(f"CFG scale: {metadata[param]}")
                 elif param == "model_hash":
@@ -585,13 +667,22 @@ class MetaManUniversalNodeV2:
                     params.append(f"Denoising strength: {metadata[param]}")
                 elif param == "width" and "height" in metadata:
                     params.append(f"Size: {metadata['width']}x{metadata['height']}")
+                    print(f"MetaMan Debug: Added size: {metadata['width']}x{metadata['height']}")
                 elif param != "height":  # Skip height since it's handled with width
                     params.append(f"{param.title()}: {metadata[param]}")
+            else:
+                print(f"MetaMan Debug: Parameter {param} not found or is None")
         
         if params:
-            lines.append(", ".join(params))
+            param_line = ", ".join(params)
+            lines.append(param_line)
+            print(f"MetaMan Debug: Added parameters line: {param_line}")
+        else:
+            print(f"MetaMan Debug: No parameters to add")
         
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        print(f"MetaMan Debug: Final A1111 output ({len(result)} chars): {result[:200]}...")
+        return result
     
     def _format_comfyui_output(self, metadata: dict, template: dict) -> str:
         """Format metadata for ComfyUI compatibility"""
@@ -753,6 +844,93 @@ class MetaManUniversalNodeV2:
         """Parse EXIF data for AI generation information"""
         # Implementation for EXIF parsing
         return {}
+    
+    def _extract_params_from_comfyui_prompt(self, prompt_data: dict) -> dict:
+        """Extract generation parameters from ComfyUI prompt data"""
+        params = {}
+        
+        print(f"MetaMan Debug: Extracting params from ComfyUI prompt with {len(prompt_data)} nodes")
+        
+        try:
+            for node_id, node_data in prompt_data.items():
+                if not isinstance(node_data, dict):
+                    continue
+                    
+                class_type = node_data.get('class_type', '')
+                inputs = node_data.get('inputs', {})
+                
+                print(f"MetaMan Debug: Processing node {node_id} of type {class_type}")
+                
+                # Extract from KSampler nodes
+                if class_type == 'KSampler':
+                    if 'steps' in inputs:
+                        params['steps'] = inputs['steps']
+                        print(f"MetaMan Debug: Found steps: {inputs['steps']}")
+                    if 'cfg' in inputs:
+                        params['cfg_scale'] = inputs['cfg']
+                        print(f"MetaMan Debug: Found CFG: {inputs['cfg']}")
+                    if 'sampler_name' in inputs:
+                        params['sampler'] = inputs['sampler_name']
+                        print(f"MetaMan Debug: Found sampler: {inputs['sampler_name']}")
+                    if 'scheduler' in inputs:
+                        params['scheduler'] = inputs['scheduler']
+                        print(f"MetaMan Debug: Found scheduler: {inputs['scheduler']}")
+                    if 'seed' in inputs:
+                        params['seed'] = inputs['seed']
+                        print(f"MetaMan Debug: Found seed: {inputs['seed']}")
+                    if 'denoise' in inputs:
+                        params['denoising_strength'] = inputs['denoise']
+                        print(f"MetaMan Debug: Found denoise: {inputs['denoise']}")
+                
+                # Extract from CheckpointLoaderSimple
+                elif class_type == 'CheckpointLoaderSimple':
+                    if 'ckpt_name' in inputs:
+                        params['model_name'] = inputs['ckpt_name']
+                        print(f"MetaMan Debug: Found model: {inputs['ckpt_name']}")
+                
+                # Extract from CLIPTextEncode (prompts)
+                elif class_type == 'CLIPTextEncode':
+                    if 'text' in inputs:
+                        # First positive prompt we find
+                        if 'prompt' not in params and inputs['text'].strip():
+                            params['prompt'] = inputs['text']
+                            print(f"MetaMan Debug: Found prompt: {inputs['text'][:100]}...")
+                        # If we already have a prompt, this might be negative
+                        elif 'negative_prompt' not in params and inputs['text'].strip():
+                            # Simple heuristic: if it contains common negative words
+                            negative_indicators = ['worst', 'low quality', 'blurry', 'bad', 'ugly', 'deformed']
+                            if any(indicator in inputs['text'].lower() for indicator in negative_indicators):
+                                params['negative_prompt'] = inputs['text']
+                                print(f"MetaMan Debug: Found negative prompt: {inputs['text'][:100]}...")
+                
+                # Extract from EmptyLatentImage (dimensions)
+                elif class_type == 'EmptyLatentImage':
+                    if 'width' in inputs:
+                        params['width'] = inputs['width']
+                        print(f"MetaMan Debug: Found width: {inputs['width']}")
+                    if 'height' in inputs:
+                        params['height'] = inputs['height']
+                        print(f"MetaMan Debug: Found height: {inputs['height']}")
+                
+                # Extract from LoraLoader nodes
+                elif class_type == 'LoraLoader':
+                    if 'lora_name' in inputs and 'strength_model' in inputs:
+                        if 'loras' not in params:
+                            params['loras'] = []
+                        lora_info = {
+                            'name': inputs['lora_name'],
+                            'weight': inputs['strength_model']
+                        }
+                        if 'strength_clip' in inputs:
+                            lora_info['clip_weight'] = inputs['strength_clip']
+                        params['loras'].append(lora_info)
+                        print(f"MetaMan Debug: Found LoRA: {inputs['lora_name']} @ {inputs['strength_model']}")
+        
+        except Exception as e:
+            print(f"MetaMan Debug: Error extracting ComfyUI params: {e}")
+        
+        print(f"MetaMan Debug: Final extracted params: {list(params.keys())}")
+        return params
 
 
 # Node mappings for ComfyUI
