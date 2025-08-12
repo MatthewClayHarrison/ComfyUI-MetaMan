@@ -3,11 +3,14 @@ MetaMan - ComfyUI Custom Node Package
 Universal metadata management for AI image generation platforms
 """
 
-from .metaman import MetaManUniversalNodeV2, MetaManLoadImage
+from .metaman import MetaManUniversalNodeV2, MetaManLoadImage, MetaManLoadAndConvert, MetaManExtractComponents, MetaManEmbedAndSave
 from .specialized_nodes import MetaManWorkflowSaver, MetaManDependencyResolver
 
 # Combine all node mappings
 NODE_CLASS_MAPPINGS = {
+    "MetaManLoadAndConvert": MetaManLoadAndConvert,
+    "MetaManExtractComponents": MetaManExtractComponents,
+    "MetaManEmbedAndSave": MetaManEmbedAndSave,
     "MetaManUniversalNodeV2": MetaManUniversalNodeV2,
     "MetaManLoadImage": MetaManLoadImage,
     "MetaManWorkflowSaver": MetaManWorkflowSaver,
@@ -15,6 +18,9 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "MetaManLoadAndConvert": "MetaMan Load & Convert",
+    "MetaManExtractComponents": "MetaMan Extract Components",
+    "MetaManEmbedAndSave": "MetaMan Embed & Save",
     "MetaManUniversalNodeV2": "MetaMan Universal V2",
     "MetaManLoadImage": "MetaMan Load Image",
     "MetaManWorkflowSaver": "MetaMan Workflow Saver", 
