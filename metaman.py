@@ -682,74 +682,395 @@ class MetaManLoadImage:
         return params
     
     def _extract_params_from_comfyui_prompt(self, prompt_data: dict) -> dict:
-        """Extract generation parameters from ComfyUI prompt data"""
+        """Universal dynamic extraction from ComfyUI prompt data - works with any node ecosystem"""
         params = {}
         
-        try:
-            for node_id, node_data in prompt_data.items():
-                if not isinstance(node_data, dict):
-                    continue
-                    
-                class_type = node_data.get('class_type', '')
-                inputs = node_data.get('inputs', {})
-                
-                # Extract from KSampler nodes
-                if class_type == 'KSampler':
-                    if 'steps' in inputs:
-                        params['steps'] = inputs['steps']
-                    if 'cfg' in inputs:
-                        params['cfg_scale'] = inputs['cfg']
-                    if 'sampler_name' in inputs:
-                        params['sampler'] = inputs['sampler_name']
-                    if 'scheduler' in inputs:
-                        params['scheduler'] = inputs['scheduler']
-                    if 'seed' in inputs:
-                        params['seed'] = inputs['seed']
-                    if 'denoise' in inputs:
-                        params['denoising_strength'] = inputs['denoise']
-                
-                # Extract from CheckpointLoaderSimple
-                elif class_type == 'CheckpointLoaderSimple':
-                    if 'ckpt_name' in inputs:
-                        params['model_name'] = inputs['ckpt_name']
-                
-                # Extract from CLIPTextEncode (prompts)
-                elif class_type == 'CLIPTextEncode':
-                    if 'text' in inputs:
-                        # First positive prompt we find
-                        if 'prompt' not in params and inputs['text'].strip():
-                            params['prompt'] = inputs['text']
-                        # If we already have a prompt, this might be negative
-                        elif 'negative_prompt' not in params and inputs['text'].strip():
-                            # Simple heuristic: if it contains common negative words
-                            negative_indicators = ['worst', 'low quality', 'blurry', 'bad', 'ugly', 'deformed']
-                            if any(indicator in inputs['text'].lower() for indicator in negative_indicators):
-                                params['negative_prompt'] = inputs['text']
-                
-                # Extract from EmptyLatentImage (dimensions)
-                elif class_type == 'EmptyLatentImage':
-                    if 'width' in inputs:
-                        params['width'] = inputs['width']
-                    if 'height' in inputs:
-                        params['height'] = inputs['height']
-                
-                # Extract from LoraLoader nodes
-                elif class_type == 'LoraLoader':
-                    if 'lora_name' in inputs and 'strength_model' in inputs:
-                        if 'loras' not in params:
-                            params['loras'] = []
-                        lora_info = {
-                            'name': inputs['lora_name'],
-                            'weight': inputs['strength_model']
-                        }
-                        if 'strength_clip' in inputs:
-                            lora_info['clip_weight'] = inputs['strength_clip']
-                        params['loras'].append(lora_info)
+        print(f"MetaMan Universal: Starting extraction from {len(prompt_data)} nodes")
         
+        try:
+            # Phase 1: Extract core parameters universally
+            self._extract_core_parameters_universal(prompt_data, params)
+            
+            # Phase 2: Collect ALL text content from all nodes
+            all_text_content = self._scan_all_text_content_universal(prompt_data)
+            print(f"MetaMan Universal: Found {len(all_text_content)} text candidates")
+            
+            # Phase 3: Classify text content using improved heuristics
+            classified_prompts = self._classify_prompts_intelligent(all_text_content)
+            
+            # Phase 4: Extract LoRAs from all text content
+            all_loras = self._extract_loras_universal(all_text_content)
+            
+            # Phase 5: Compile final results
+            if classified_prompts['positive']:
+                params['prompt'] = classified_prompts['positive']['text']
+                print(f"MetaMan Universal: POSITIVE from {classified_prompts['positive']['source']}: {params['prompt'][:100]}...")
+            
+            if classified_prompts['negative']:
+                params['negative_prompt'] = classified_prompts['negative']['text']
+                print(f"MetaMan Universal: NEGATIVE from {classified_prompts['negative']['source']}: {params['negative_prompt'][:100]}...")
+            
+            if all_loras:
+                params['loras'] = all_loras
+                print(f"MetaMan Universal: Extracted {len(all_loras)} LoRAs: {[lora['name'] for lora in all_loras]}")
+            
+            print(f"MetaMan Universal: Extraction complete: {list(params.keys())}")
+            
         except Exception as e:
-            print(f"MetaMan Load Image: Error extracting ComfyUI params: {e}")
+            print(f"MetaMan Universal Extraction Error: {e}")
+            import traceback
+            traceback.print_exc()
         
         return params
+    
+    def _extract_core_parameters_universal(self, prompt_data: dict, params: dict):
+        """Extract core parameters from all nodes universally"""
+        print(f"MetaMan Universal: Extracting core parameters...")
+        
+        for node_id, node_data in prompt_data.items():
+            if not isinstance(node_data, dict):
+                continue
+                
+            class_type = node_data.get('class_type', '')
+            inputs = node_data.get('inputs', {})
+            
+            self._extract_core_parameters_from_node(inputs, class_type, params, node_id)
+    
+    def _extract_core_parameters_from_node(self, inputs: dict, class_type: str, params: dict, node_id: str):
+        """Extract core parameters from any node type"""
+        # Universal parameter mapping with broader coverage
+        param_mappings = {
+            'steps': ['steps', 'sampling_steps', 'num_steps', 'inference_steps'],
+            'cfg_scale': ['cfg', 'cfg_scale', 'guidance_scale', 'guidance'],
+            'sampler': ['sampler_name', 'sampler', 'sampling_method', 'sampler_type'],
+            'scheduler': ['scheduler', 'scheduler_name', 'noise_schedule', 'scheduler_type'],
+            'seed': ['seed', 'noise_seed', 'random_seed', 'generator_seed'],
+            'denoising_strength': ['denoise', 'denoising_strength', 'strength', 'denoise_strength'],
+            'model_name': ['ckpt_name', 'model_name', 'checkpoint_name', 'model', 'checkpoint'],
+            'width': ['width', 'image_width', 'w', 'img_width'],
+            'height': ['height', 'image_height', 'h', 'img_height']
+        }
+        
+        for param_key, possible_fields in param_mappings.items():
+            if param_key not in params:  # Don't overwrite existing values
+                for field in possible_fields:
+                    if field in inputs and inputs[field] is not None:
+                        params[param_key] = inputs[field]
+                        print(f"MetaMan Universal: Found {param_key} = {inputs[field]} in {node_id} ({class_type})")
+                        break
+    
+    def _find_text_fields(self, inputs: dict) -> list:
+        """Find all text fields in node inputs"""
+        text_fields = []
+        text_field_names = [
+            'text', 'prompt', 'positive', 'negative',
+            'wildcard_text', 'populated_text', 'formatted_text',
+            'content', 'description', 'caption'
+        ]
+        
+        for field_name, value in inputs.items():
+            if isinstance(value, str) and len(value.strip()) > 0:
+                # Direct text fields
+                if any(text_name in field_name.lower() for text_name in text_field_names):
+                    text_fields.append((field_name, value))
+                # Check for any other string fields that might contain prompts
+                elif len(value) > 50:  # Likely to be prompt text
+                    text_fields.append((field_name, value))
+        
+        return text_fields
+    
+    def _analyze_text_content(self, text: str, field_name: str) -> str:
+        """Analyze text content to determine if it's positive, negative, or general"""
+        text_lower = text.lower()
+        field_lower = field_name.lower()
+        
+        # Field name indicators
+        if 'negative' in field_lower or 'bad' in field_lower:
+            return 'negative'
+        elif 'positive' in field_lower or 'prompt' in field_lower:
+            return 'positive'
+        
+        # Content analysis
+        negative_indicators = [
+            'worst', 'low quality', 'blurry', 'bad', 'ugly', 'deformed',
+            'distorted', 'mutation', 'error', 'artifact', 'disfigured',
+            'extra limbs', 'missing', 'cropped', 'watermark', 'text'
+        ]
+        
+        positive_indicators = [
+            'masterpiece', 'best quality', 'high resolution', 'detailed',
+            'beautiful', 'professional', 'sharp focus', 'cinematic',
+            'score_9', 'score_8', 'photorealistic', 'ultra'
+        ]
+        
+        negative_count = sum(1 for indicator in negative_indicators if indicator in text_lower)
+        positive_count = sum(1 for indicator in positive_indicators if indicator in text_lower)
+        
+        if negative_count > positive_count and negative_count > 2:
+            return 'negative'
+        elif positive_count > 0 or len(text) > 100:  # Longer text usually positive
+            return 'positive'
+        else:
+            return 'general'
+    
+    def _score_text_relevance(self, text: str, field_name: str, category: str) -> float:
+        """Score text relevance for prompt selection"""
+        score = 0.0
+        
+        # Field name scoring
+        field_lower = field_name.lower()
+        if 'populated' in field_lower or 'formatted' in field_lower:
+            score += 10.0  # Processed text is usually better
+        elif 'text' in field_lower or 'prompt' in field_lower:
+            score += 5.0
+        
+        # Content scoring
+        if category == 'positive':
+            score += len(text) * 0.01  # Longer positive prompts often better
+            if '<lora:' in text:
+                score += 5.0  # LoRAs indicate main prompt
+        elif category == 'negative':
+            score += 3.0  # Give negative prompts moderate priority
+        
+        return score
+    
+    def _select_best_prompts(self, text_candidates: dict, params: dict):
+        """Select the best positive and negative prompts"""
+        # Sort candidates by score
+        for category in text_candidates:
+            text_candidates[category].sort(key=lambda x: x['score'], reverse=True)
+        
+        # Select best positive prompt
+        if text_candidates['positive']:
+            best_positive = text_candidates['positive'][0]
+            params['prompt'] = best_positive['text']
+            print(f"MetaMan Debug: Selected positive from {best_positive['node']}.{best_positive['field']} (score: {best_positive['score']:.1f})")
+        elif text_candidates['general']:
+            # Fallback to general text
+            best_general = text_candidates['general'][0]
+            params['prompt'] = best_general['text']
+            print(f"MetaMan Debug: Fallback positive from {best_general['node']}.{best_general['field']}")
+        
+        # Select best negative prompt
+        if text_candidates['negative']:
+            best_negative = text_candidates['negative'][0]
+            params['negative_prompt'] = best_negative['text']
+            print(f"MetaMan Debug: Selected negative from {best_negative['node']}.{best_negative['field']} (score: {best_negative['score']:.1f})")
+    
+    def _extract_loras_from_text(self, text: str) -> list:
+        """Extract LoRA information from text using regex"""
+        import re
+        
+        loras = []
+        
+        # Pattern for <lora:name:weight> or <lora:name>
+        lora_pattern = r'<lora:([^>:]+)(?::([0-9.]+))?[^>]*>'
+        matches = re.findall(lora_pattern, text, re.IGNORECASE)
+        
+        for match in matches:
+            name = match[0].strip()
+            weight = float(match[1]) if match[1] else 1.0
+            
+            loras.append({
+                'name': name,
+                'weight': weight
+            })
+        
+        return loras
+    
+    def _scan_all_text_content_universal(self, prompt_data: dict) -> list:
+        """Scan ALL nodes for text content with enhanced detection"""
+        text_candidates = []
+        
+        for node_id, node_data in prompt_data.items():
+            if not isinstance(node_data, dict):
+                continue
+                
+            class_type = node_data.get('class_type', '')
+            inputs = node_data.get('inputs', {})
+            
+            # Enhanced text field detection
+            for field_name, field_value in inputs.items():
+                if isinstance(field_value, str) and len(field_value.strip()) > 5:
+                    text_candidates.append({
+                        'text': field_value,
+                        'source': f"{node_id}.{field_name}",
+                        'node_id': node_id,
+                        'field_name': field_name,
+                        'node_type': class_type,
+                        'length': len(field_value),
+                        'is_text_field': self._is_likely_text_field(field_name),
+                        'is_processed_field': self._is_processed_text_field(field_name)
+                    })
+                    
+                    print(f"MetaMan Universal: Found text in {node_id}.{field_name} ({class_type}): {len(field_value)} chars")
+        
+        return text_candidates
+    
+    def _is_likely_text_field(self, field_name: str) -> bool:
+        """Check if field name indicates text content"""
+        text_indicators = [
+            'text', 'prompt', 'positive', 'negative', 'content', 'description',
+            'caption', 'wildcard', 'populated', 'formatted', 'input', 'output'
+        ]
+        field_lower = field_name.lower()
+        return any(indicator in field_lower for indicator in text_indicators)
+    
+    def _is_processed_text_field(self, field_name: str) -> bool:
+        """Check if field name indicates processed/formatted text"""
+        processed_indicators = ['populated', 'formatted', 'processed', 'final', 'output', 'result']
+        field_lower = field_name.lower()
+        return any(indicator in field_lower for indicator in processed_indicators)
+    
+    def _classify_prompts_intelligent(self, text_candidates: list) -> dict:
+        """Intelligent classification of text content into positive/negative prompts"""
+        classified = {'positive': None, 'negative': None}
+        
+        # Score all candidates for positive/negative likelihood
+        positive_candidates = []
+        negative_candidates = []
+        
+        for candidate in text_candidates:
+            if len(candidate['text']) < 20:  # Skip very short text
+                continue
+                
+            pos_score = self._score_as_positive_prompt(candidate)
+            neg_score = self._score_as_negative_prompt(candidate)
+            
+            candidate['positive_score'] = pos_score
+            candidate['negative_score'] = neg_score
+            
+            print(f"MetaMan Universal: {candidate['source']} - Pos: {pos_score:.1f}, Neg: {neg_score:.1f}")
+            
+            if pos_score > 0.5:
+                positive_candidates.append(candidate)
+            if neg_score > 0.5:
+                negative_candidates.append(candidate)
+        
+        # Select best positive prompt
+        if positive_candidates:
+            positive_candidates.sort(key=lambda x: x['positive_score'], reverse=True)
+            classified['positive'] = positive_candidates[0]
+            print(f"MetaMan Universal: Best positive: {classified['positive']['source']} (score: {classified['positive']['positive_score']:.1f})")
+        
+        # Select best negative prompt  
+        if negative_candidates:
+            negative_candidates.sort(key=lambda x: x['negative_score'], reverse=True)
+            classified['negative'] = negative_candidates[0]
+            print(f"MetaMan Universal: Best negative: {classified['negative']['source']} (score: {classified['negative']['negative_score']:.1f})")
+        
+        return classified
+    
+    def _score_as_positive_prompt(self, candidate: dict) -> float:
+        """Score text as likely positive prompt"""
+        score = 0.0
+        text = candidate['text']
+        text_lower = text.lower()
+        field_name = candidate['field_name'].lower()
+        
+        # Field name indicators (strong signals)
+        if 'positive' in field_name or 'prompt' in field_name:
+            score += 3.0
+        if 'populated' in field_name or 'formatted' in field_name:
+            score += 2.0  # Processed text usually main prompt
+        if 'text' in field_name:
+            score += 1.0
+        
+        # Content indicators
+        positive_keywords = [
+            'score_9', 'score_8', 'masterpiece', 'best quality', 'high resolution',
+            'detailed', 'beautiful', 'professional', 'cinematic', 'photorealistic',
+            'ultra', 'highly detailed', 'intricate', 'sharp focus', 'realistic'
+        ]
+        
+        keyword_count = sum(1 for keyword in positive_keywords if keyword in text_lower)
+        score += keyword_count * 0.5
+        
+        # LoRA presence (strong indicator of main prompt)
+        if '<lora:' in text:
+            lora_count = text.count('<lora:')
+            score += lora_count * 1.0
+            print(f"MetaMan Universal: Found {lora_count} LoRAs in {candidate['source']} (+{lora_count} score)")
+        
+        # Length scoring (longer text often positive)
+        if len(text) > 200:
+            score += 2.0
+        elif len(text) > 100:
+            score += 1.0
+        elif len(text) > 50:
+            score += 0.5
+        
+        # Negative indicators (reduce score)
+        negative_keywords = ['worst', 'low quality', 'bad', 'ugly', 'blurry', 'deformed']
+        negative_count = sum(1 for keyword in negative_keywords if keyword in text_lower)
+        if negative_count > 2:
+            score -= 2.0  # Likely negative prompt
+        
+        return max(0.0, score)
+    
+    def _score_as_negative_prompt(self, candidate: dict) -> float:
+        """Score text as likely negative prompt"""
+        score = 0.0
+        text = candidate['text']
+        text_lower = text.lower()
+        field_name = candidate['field_name'].lower()
+        
+        # Field name indicators
+        if 'negative' in field_name:
+            score += 5.0  # Very strong indicator
+        elif 'bad' in field_name or 'unwanted' in field_name:
+            score += 3.0
+        
+        # Content analysis - negative keywords
+        negative_keywords = [
+            'worst quality', 'low quality', 'bad', 'ugly', 'blurry', 'deformed',
+            'distorted', 'mutation', 'error', 'artifact', 'disfigured',
+            'extra limbs', 'missing', 'cropped', 'watermark', 'text', 'signature',
+            'username', 'lowres', 'jpeg artifacts', 'duplicate', 'morbid',
+            'mutilated', 'poorly drawn', 'extra fingers', 'fused fingers',
+            'too many fingers', 'unclear eyes', 'lowers', 'bad anatomy',
+            'bad hands', 'missing fingers', 'extra digit', 'fewer digits'
+        ]
+        
+        keyword_count = sum(1 for keyword in negative_keywords if keyword in text_lower)
+        score += keyword_count * 0.7
+        
+        # Pattern analysis - negative prompts often have parentheses with weights
+        parentheses_content = re.findall(r'\([^)]+:[0-9.]+\)', text)
+        if parentheses_content:
+            score += len(parentheses_content) * 0.5
+        
+        # Short text with negative words likely negative prompt
+        if len(text) < 200 and keyword_count > 1:
+            score += 1.0
+        
+        # Positive indicators (reduce score)
+        positive_keywords = ['masterpiece', 'best quality', 'detailed', 'beautiful']
+        positive_count = sum(1 for keyword in positive_keywords if keyword in text_lower)
+        if positive_count > 1:
+            score -= 1.5  # Likely positive prompt
+        
+        # LoRA presence (usually in positive prompts)
+        if '<lora:' in text:
+            score -= 2.0  # LoRAs typically in positive prompts
+        
+        return max(0.0, score)
+    
+    def _extract_loras_universal(self, text_candidates: list) -> list:
+        """Extract LoRAs from all text content"""
+        all_loras = []
+        seen_loras = set()
+        
+        for candidate in text_candidates:
+            loras_in_text = self._extract_loras_from_text(candidate['text'])
+            for lora in loras_in_text:
+                lora_key = lora['name'].lower()
+                if lora_key not in seen_loras:
+                    seen_loras.add(lora_key)
+                    all_loras.append(lora)
+                    print(f"MetaMan Universal: Found LoRA '{lora['name']}' (weight: {lora['weight']}) in {candidate['source']}")
+        
+        return all_loras
 
 
 class MetaManUniversalNodeV2:
