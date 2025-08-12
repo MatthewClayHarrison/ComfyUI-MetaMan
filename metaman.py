@@ -344,7 +344,7 @@ class MetaManExtractComponents:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "metadata_json": ("STRING", {"default": "", "multiline": True})
+                "metadata_json": ("STRING", {"forceInput": True})
             }
         }
     
@@ -412,7 +412,7 @@ class MetaManExtractComponents:
 
 class MetaManEmbedAndSave:
     """
-    Embed metadata into image and save as PNG with metadata
+    Embed metadata into image and save as PNG file to output directory
     """
     
     @classmethod
@@ -420,7 +420,7 @@ class MetaManEmbedAndSave:
         return {
             "required": {
                 "image": ("IMAGE",),
-                "metadata_text": ("STRING", {"default": "", "multiline": True}),
+                "metadata_json": ("STRING", {"forceInput": True}),
             },
             "optional": {
                 "filename_prefix": ("STRING", {"default": "MetaMan_converted"})
@@ -428,16 +428,39 @@ class MetaManEmbedAndSave:
         }
     
     CATEGORY = "MetaMan"
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("final_image",)
+    RETURN_TYPES = ()
+    RETURN_NAMES = ()
     FUNCTION = "embed_and_save"
-    DESCRIPTION = "Embed metadata into image and save as PNG"
+    OUTPUT_NODE = True
+    DESCRIPTION = "Embed metadata into image and save as PNG file"
     
-    def embed_and_save(self, image, metadata_text, filename_prefix="MetaMan_converted"):
+    def embed_and_save(self, image, metadata_json, filename_prefix="MetaMan_converted"):
         """
-        Embed metadata into image and return final image with metadata
+        Embed metadata into image and save as PNG file to output directory
         """
         try:
+            # Parse metadata JSON to extract target format
+            if metadata_json and metadata_json.strip():
+                try:
+                    metadata_data = json.loads(metadata_json)
+                    # Extract target metadata or use universal metadata
+                    if 'target_metadata' in metadata_data:
+                        metadata_text = metadata_data['target_metadata']
+                        print(f"MetaMan Embed & Save: Using target metadata ({len(metadata_text)} chars)")
+                    elif 'metadata' in metadata_data:
+                        # Convert metadata dict to A1111 format
+                        metadata_text = self._format_metadata_for_embedding(metadata_data['metadata'])
+                        print(f"MetaMan Embed & Save: Converted metadata to A1111 format ({len(metadata_text)} chars)")
+                    else:
+                        metadata_text = json.dumps(metadata_data, indent=2)
+                        print(f"MetaMan Embed & Save: Using raw JSON ({len(metadata_text)} chars)")
+                except Exception as e:
+                    print(f"MetaMan Embed & Save: Error parsing metadata JSON: {e}")
+                    metadata_text = metadata_json  # Fallback to raw input
+            else:
+                metadata_text = "MetaMan processed image"
+                print(f"MetaMan Embed & Save: No metadata provided, using default")
+            
             # Convert tensor to PIL Image
             if isinstance(image, torch.Tensor):
                 img_tensor = image[0]
@@ -446,43 +469,61 @@ class MetaManEmbedAndSave:
             else:
                 pil_image = image
             
-            # Embed metadata in image
-            result_image = self._embed_metadata_in_image(pil_image, metadata_text)
-            
-            # Save to ComfyUI output directory
+            # Save to ComfyUI output directory with metadata
             output_dir = folder_paths.get_output_directory()
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"{filename_prefix}_{timestamp}.png"
             filepath = os.path.join(output_dir, filename)
             
-            # Save with metadata
+            # Create PNG info with metadata
             png_info = PngInfo()
             png_info.add_text("parameters", metadata_text)
             png_info.add_text("metaman_converted", datetime.now().isoformat())
+            png_info.add_text("metaman_version", "1.0.0")
             
-            result_image.save(filepath, "PNG", pnginfo=png_info)
-            print(f"MetaMan Embed & Save: Saved image with metadata to {filepath}")
+            # Save image with embedded metadata
+            pil_image.save(filepath, "PNG", pnginfo=png_info)
             
-            # Convert back to tensor
-            if isinstance(image, torch.Tensor):
-                import numpy as np
-                img_array = np.array(result_image).astype(np.float32) / 255.0
-                output_tensor = torch.from_numpy(img_array).unsqueeze(0)
-                return (output_tensor,)
+            print(f"MetaMan Embed & Save: Successfully saved image with metadata to {filepath}")
+            print(f"MetaMan Embed & Save: File size: {os.path.getsize(filepath)} bytes")
             
-            return (result_image,)
+            return {"ui": {"images": [{"filename": filename, "subfolder": "", "type": "output"}]}}
             
         except Exception as e:
             print(f"MetaMan Embed & Save Error: {e}")
-            return (image,)
+            return {"ui": {"text": [f"Error: {str(e)}"]}}
     
-    def _embed_metadata_in_image(self, image: Image.Image, metadata_text: str) -> Image.Image:
-        """Embed metadata into image PNG chunks"""
-        # Create new image copy
-        result_image = image.copy() if hasattr(image, 'copy') else image
+    def _format_metadata_for_embedding(self, metadata: dict) -> str:
+        """Convert metadata dict to A1111 format for embedding"""
+        lines = []
         
-        # This is handled in the save process with PngInfo
-        return result_image
+        # Positive prompt
+        if 'prompt' in metadata:
+            lines.append(metadata['prompt'])
+        
+        # Negative prompt
+        if 'negative_prompt' in metadata:
+            lines.append(f"Negative prompt: {metadata['negative_prompt']}")
+        
+        # Parameters line
+        params = []
+        param_order = ["steps", "sampler", "cfg_scale", "seed", "width", "height", "model_name", "scheduler"]
+        
+        for param in param_order:
+            if param in metadata and metadata[param] is not None:
+                if param == "cfg_scale":
+                    params.append(f"CFG scale: {metadata[param]}")
+                elif param == "model_name":
+                    params.append(f"Model: {metadata[param]}")
+                elif param == "width" and "height" in metadata:
+                    params.append(f"Size: {metadata['width']}x{metadata['height']}")
+                elif param != "height":  # Skip height since it's handled with width
+                    params.append(f"{param.title()}: {metadata[param]}")
+        
+        if params:
+            lines.append(", ".join(params))
+        
+        return "\n".join(lines)
 
 
 class MetaManLoadImage:
