@@ -382,10 +382,20 @@ class MetaManUniversalNodeV2:
         metadata = {}
         
         print(f"MetaMan Debug: Starting metadata extraction...")
+        print(f"MetaMan Debug: Image type: {type(image)}")
+        print(f"MetaMan Debug: Image mode: {getattr(image, 'mode', 'N/A')}")
+        print(f"MetaMan Debug: Image format: {getattr(image, 'format', 'N/A')}")
+        print(f"MetaMan Debug: Image size: {getattr(image, 'size', 'N/A')}")
+        
+        # Check if image has filename attribute (from file loading)
+        if hasattr(image, 'filename'):
+            print(f"MetaMan Debug: Image filename: {image.filename}")
         
         # Check PNG text chunks
         if hasattr(image, 'text') and image.text:
             print(f"MetaMan Debug: Found PNG text chunks: {list(image.text.keys())}")
+            for key, value in image.text.items():
+                print(f"MetaMan Debug: Chunk '{key}': {len(value)} characters")
             
             # A1111/Civitai parameters format
             if 'parameters' in image.text:
@@ -427,6 +437,28 @@ class MetaManUniversalNodeV2:
                     print(f"MetaMan Debug: Error parsing meta chunk: {e}")
         else:
             print(f"MetaMan Debug: No PNG text chunks found or image.text is empty")
+            print(f"MetaMan Debug: image.text value: {getattr(image, 'text', 'ATTRIBUTE_MISSING')}")
+            
+            # Try alternative PNG info access
+            if hasattr(image, 'info'):
+                print(f"MetaMan Debug: Image.info keys: {list(image.info.keys())}")
+                for key, value in image.info.items():
+                    if isinstance(value, str) and len(value) > 50:
+                        print(f"MetaMan Debug: Info '{key}': {len(value)} characters")
+                        # Try to parse as potential metadata
+                        if key.lower() in ['parameters', 'workflow', 'prompt', 'meta']:
+                            print(f"MetaMan Debug: Found potential metadata in info['{key}']")
+                            if key == 'parameters':
+                                metadata.update(self._parse_a1111_parameters(value))
+                            elif key in ['workflow', 'prompt']:
+                                try:
+                                    data = json.loads(value)
+                                    metadata[f'comfyui_{key}'] = data
+                                    if key == 'prompt':
+                                        extracted_params = self._extract_params_from_comfyui_prompt(data)
+                                        metadata.update(extracted_params)
+                                except:
+                                    pass
         
         # Check EXIF data
         if hasattr(image, '_getexif') and image._getexif():
