@@ -18,6 +18,273 @@ from typing import Optional, Any, Union
 from datetime import datetime
 
 
+class MetaManLoadImage:
+    """
+    Custom Load Image node that preserves PNG metadata
+    Designed to work with MetaMan Universal node
+    """
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        input_dir = folder_paths.get_input_directory()
+        files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
+        return {
+            "required": {
+                "image": (sorted(files), {"image_upload": True})
+            }
+        }
+    
+    CATEGORY = "MetaMan"
+    RETURN_TYPES = ("IMAGE", "STRING")
+    RETURN_NAMES = ("image", "metadata_json")
+    FUNCTION = "load_image_with_metadata"
+    DESCRIPTION = "Load image while preserving PNG metadata for MetaMan"
+    
+    def load_image_with_metadata(self, image):
+        """
+        Load image and extract metadata, returning both
+        """
+        try:
+            input_dir = folder_paths.get_input_directory()
+            image_path = folder_paths.get_annotated_filepath(image, input_dir)
+            
+            print(f"MetaMan Load Image: Loading {image_path}")
+            
+            # Load image with PIL to preserve metadata
+            pil_image = Image.open(image_path)
+            print(f"MetaMan Load Image: Image size: {pil_image.size}")
+            print(f"MetaMan Load Image: Image format: {pil_image.format}")
+            
+            # Extract metadata from the original file
+            metadata = self._extract_metadata_from_image(pil_image, image_path)
+            
+            # Convert PIL image to tensor for ComfyUI
+            import numpy as np
+            img_array = np.array(pil_image.convert('RGB')).astype(np.float32) / 255.0
+            img_tensor = torch.from_numpy(img_array).unsqueeze(0)
+            
+            # Create metadata JSON output
+            metadata_json = {
+                "source_file_path": image_path,
+                "image_size": pil_image.size,
+                "image_format": pil_image.format,
+                "metadata": metadata,
+                "extracted_at": datetime.now().isoformat()
+            }
+            
+            print(f"MetaMan Load Image: Extracted metadata keys: {list(metadata.keys())}")
+            
+            return (img_tensor, json.dumps(metadata_json, indent=2))
+            
+        except Exception as e:
+            print(f"MetaMan Load Image Error: {e}")
+            # Return empty tensor and error message
+            empty_tensor = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
+            error_json = {"error": str(e), "source_file_path": image_path if 'image_path' in locals() else "unknown"}
+            return (empty_tensor, json.dumps(error_json, indent=2))
+    
+    def _extract_metadata_from_image(self, pil_image, file_path):
+        """Extract all available metadata from PIL image"""
+        metadata = {}
+        
+        try:
+            # PNG text chunks
+            if hasattr(pil_image, 'text') and pil_image.text:
+                print(f"MetaMan Load Image: Found PNG text chunks: {list(pil_image.text.keys())}")
+                
+                for key, value in pil_image.text.items():
+                    print(f"MetaMan Load Image: Chunk '{key}': {len(value)} characters")
+                    
+                    # Store raw chunk data
+                    metadata[f"png_chunk_{key}"] = value
+                    
+                    # Parse specific formats
+                    if key == 'parameters':
+                        # A1111/Civitai parameters
+                        try:
+                            parsed_params = self._parse_a1111_parameters(value)
+                            metadata.update(parsed_params)
+                            print(f"MetaMan Load Image: Parsed A1111 parameters: {list(parsed_params.keys())}")
+                        except Exception as e:
+                            print(f"MetaMan Load Image: Error parsing A1111 parameters: {e}")
+                    
+                    elif key in ['workflow', 'prompt']:
+                        # ComfyUI workflow/prompt data
+                        try:
+                            json_data = json.loads(value)
+                            metadata[f"comfyui_{key}"] = json_data
+                            print(f"MetaMan Load Image: Parsed ComfyUI {key}: {len(json_data)} nodes")
+                            
+                            # If this is prompt data, extract parameters immediately
+                            if key == 'prompt':
+                                extracted_params = self._extract_params_from_comfyui_prompt(json_data)
+                                metadata.update(extracted_params)
+                                print(f"MetaMan Load Image: Extracted ComfyUI params: {list(extracted_params.keys())}")
+                                
+                        except Exception as e:
+                            print(f"MetaMan Load Image: Error parsing ComfyUI {key}: {e}")
+                    
+                    elif key == 'meta':
+                        # MetaMan universal format
+                        try:
+                            meta_data = json.loads(value)
+                            metadata.update(meta_data)
+                            print(f"MetaMan Load Image: Parsed MetaMan meta chunk")
+                        except Exception as e:
+                            print(f"MetaMan Load Image: Error parsing meta chunk: {e}")
+            else:
+                print(f"MetaMan Load Image: No PNG text chunks found")
+            
+            # Check image.info as fallback
+            if hasattr(pil_image, 'info') and pil_image.info:
+                print(f"MetaMan Load Image: Found image.info keys: {list(pil_image.info.keys())}")
+                for key, value in pil_image.info.items():
+                    if isinstance(value, str) and len(value) > 50:
+                        metadata[f"info_{key}"] = value
+                        print(f"MetaMan Load Image: Stored info['{key}']: {len(value)} characters")
+            
+        except Exception as e:
+            print(f"MetaMan Load Image: Error extracting metadata: {e}")
+        
+        return metadata
+    
+    def _parse_a1111_parameters(self, params_text: str) -> dict:
+        """Parse A1111/Civitai parameters format"""
+        metadata = {}
+        lines = params_text.strip().split('\n')
+        
+        if lines:
+            # First line is usually the positive prompt
+            metadata['prompt'] = lines[0].strip()
+            
+            # Look for negative prompt
+            for i, line in enumerate(lines[1:], 1):
+                if line.startswith('Negative prompt:'):
+                    metadata['negative_prompt'] = line.replace('Negative prompt:', '').strip()
+                    continue
+                
+                # Parse parameter line (usually the last line)
+                if ',' in line and ':' in line:
+                    params = self._parse_parameter_line(line)
+                    metadata.update(params)
+        
+        return metadata
+    
+    def _parse_parameter_line(self, line: str) -> dict:
+        """Parse A1111 parameter line"""
+        params = {}
+        
+        # Split by comma, but be careful of commas in quoted values
+        parts = []
+        current = ""
+        in_quotes = False
+        
+        for char in line:
+            if char == '"' and (not current or current[-1] != '\\'):
+                in_quotes = not in_quotes
+            elif char == ',' and not in_quotes:
+                parts.append(current.strip())
+                current = ""
+                continue
+            current += char
+        
+        if current.strip():
+            parts.append(current.strip())
+        
+        # Parse each parameter
+        for part in parts:
+            if ':' in part:
+                key, value = part.split(':', 1)
+                key = key.strip().lower().replace(' ', '_')
+                value = value.strip()
+                
+                # Convert known numeric values
+                if key in ['steps', 'width', 'height', 'seed', 'clip_skip']:
+                    try:
+                        params[key] = int(value)
+                    except:
+                        params[key] = value
+                elif key in ['cfg_scale', 'denoising_strength', 'eta']:
+                    try:
+                        params[key] = float(value)
+                    except:
+                        params[key] = value
+                else:
+                    params[key] = value
+        
+        return params
+    
+    def _extract_params_from_comfyui_prompt(self, prompt_data: dict) -> dict:
+        """Extract generation parameters from ComfyUI prompt data"""
+        params = {}
+        
+        try:
+            for node_id, node_data in prompt_data.items():
+                if not isinstance(node_data, dict):
+                    continue
+                    
+                class_type = node_data.get('class_type', '')
+                inputs = node_data.get('inputs', {})
+                
+                # Extract from KSampler nodes
+                if class_type == 'KSampler':
+                    if 'steps' in inputs:
+                        params['steps'] = inputs['steps']
+                    if 'cfg' in inputs:
+                        params['cfg_scale'] = inputs['cfg']
+                    if 'sampler_name' in inputs:
+                        params['sampler'] = inputs['sampler_name']
+                    if 'scheduler' in inputs:
+                        params['scheduler'] = inputs['scheduler']
+                    if 'seed' in inputs:
+                        params['seed'] = inputs['seed']
+                    if 'denoise' in inputs:
+                        params['denoising_strength'] = inputs['denoise']
+                
+                # Extract from CheckpointLoaderSimple
+                elif class_type == 'CheckpointLoaderSimple':
+                    if 'ckpt_name' in inputs:
+                        params['model_name'] = inputs['ckpt_name']
+                
+                # Extract from CLIPTextEncode (prompts)
+                elif class_type == 'CLIPTextEncode':
+                    if 'text' in inputs:
+                        # First positive prompt we find
+                        if 'prompt' not in params and inputs['text'].strip():
+                            params['prompt'] = inputs['text']
+                        # If we already have a prompt, this might be negative
+                        elif 'negative_prompt' not in params and inputs['text'].strip():
+                            # Simple heuristic: if it contains common negative words
+                            negative_indicators = ['worst', 'low quality', 'blurry', 'bad', 'ugly', 'deformed']
+                            if any(indicator in inputs['text'].lower() for indicator in negative_indicators):
+                                params['negative_prompt'] = inputs['text']
+                
+                # Extract from EmptyLatentImage (dimensions)
+                elif class_type == 'EmptyLatentImage':
+                    if 'width' in inputs:
+                        params['width'] = inputs['width']
+                    if 'height' in inputs:
+                        params['height'] = inputs['height']
+                
+                # Extract from LoraLoader nodes
+                elif class_type == 'LoraLoader':
+                    if 'lora_name' in inputs and 'strength_model' in inputs:
+                        if 'loras' not in params:
+                            params['loras'] = []
+                        lora_info = {
+                            'name': inputs['lora_name'],
+                            'weight': inputs['strength_model']
+                        }
+                        if 'strength_clip' in inputs:
+                            lora_info['clip_weight'] = inputs['strength_clip']
+                        params['loras'].append(lora_info)
+        
+        except Exception as e:
+            print(f"MetaMan Load Image: Error extracting ComfyUI params: {e}")
+        
+        return params
+
+
 class MetaManUniversalNodeV2:
     """
     Universal metadata management node for ComfyUI
@@ -36,6 +303,9 @@ class MetaManUniversalNodeV2:
             "required": {
                 "image": ("IMAGE",),
                 "target_service": (cls.SUPPORTED_SERVICES, {"default": "automatic1111"}),
+            },
+            "optional": {
+                "metadata_json": ("STRING", {"default": "", "multiline": True}),
             }
         }
     
@@ -254,7 +524,7 @@ class MetaManUniversalNodeV2:
         
         return templates
 
-    def process_metadata(self, image, target_service):
+    def process_metadata(self, image, target_service, metadata_json=""):
         """
         Main processing function: extract metadata, convert to target service, and embed in image
         """
@@ -267,16 +537,28 @@ class MetaManUniversalNodeV2:
             else:
                 pil_image = image
             
-            # Check if we can extract metadata from the PIL image
-            source_metadata = self._extract_source_metadata(pil_image)
+            # Check if metadata was provided from MetaManLoadImage node
+            source_metadata = {}
+            if metadata_json and metadata_json.strip():
+                try:
+                    metadata_data = json.loads(metadata_json)
+                    source_metadata = metadata_data.get("metadata", {})
+                    print(f"MetaMan Debug: Using metadata from MetaManLoadImage: {list(source_metadata.keys())}")
+                    print(f"MetaMan Debug: Source file: {metadata_data.get('source_file_path', 'unknown')}")
+                except Exception as e:
+                    print(f"MetaMan Debug: Error parsing metadata_json: {e}")
             
-            # If no metadata found, try to find and read the original file
+            # If no metadata from load image node, try extracting from PIL image
             if not source_metadata:
-                print(f"MetaMan Debug: No metadata in PIL image, attempting direct file reading...")
-                original_file_metadata = self._try_read_original_file(pil_image)
-                if original_file_metadata:
-                    source_metadata = original_file_metadata
-                    print(f"MetaMan Debug: Successfully read metadata from original file")
+                source_metadata = self._extract_source_metadata(pil_image)
+                
+                # If still no metadata found, try to find and read the original file
+                if not source_metadata:
+                    print(f"MetaMan Debug: No metadata in PIL image, attempting direct file reading...")
+                    original_file_metadata = self._try_read_original_file(pil_image)
+                    if original_file_metadata:
+                        source_metadata = original_file_metadata
+                        print(f"MetaMan Debug: Successfully read metadata from original file")
             
             source_service = self._detect_source_service(source_metadata)
             
@@ -1099,9 +1381,11 @@ class MetaManUniversalNodeV2:
 
 # Node mappings for ComfyUI
 NODE_CLASS_MAPPINGS = {
-    "MetaManUniversalNodeV2": MetaManUniversalNodeV2
+    "MetaManUniversalNodeV2": MetaManUniversalNodeV2,
+    "MetaManLoadImage": MetaManLoadImage
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "MetaManUniversalNodeV2": "MetaMan Universal V2"
+    "MetaManUniversalNodeV2": "MetaMan Universal V2",
+    "MetaManLoadImage": "MetaMan Load Image"
 }
