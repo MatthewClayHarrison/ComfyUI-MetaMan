@@ -302,10 +302,8 @@ class MetaManUniversalNodeV2:
         return {
             "required": {
                 "image": ("IMAGE",),
-                "target_service": (cls.SUPPORTED_SERVICES, {"default": "automatic1111"}),
-            },
-            "optional": {
                 "metadata_json": ("STRING", {"default": "", "multiline": True}),
+                "target_service": (cls.SUPPORTED_SERVICES, {"default": "automatic1111"}),
             }
         }
     
@@ -524,7 +522,7 @@ class MetaManUniversalNodeV2:
         
         return templates
 
-    def process_metadata(self, image, target_service, metadata_json=""):
+    def process_metadata(self, image, metadata_json, target_service):
         """
         Main processing function: extract metadata, convert to target service, and embed in image
         """
@@ -547,9 +545,13 @@ class MetaManUniversalNodeV2:
                     print(f"MetaMan Debug: Source file: {metadata_data.get('source_file_path', 'unknown')}")
                 except Exception as e:
                     print(f"MetaMan Debug: Error parsing metadata_json: {e}")
+                    return (image, json.dumps({"error": f"Invalid metadata_json format: {e}"}, indent=2))
+            else:
+                print(f"MetaMan Debug: No metadata_json provided - use MetaManLoadImage node for best results")
             
             # If no metadata from load image node, try extracting from PIL image
             if not source_metadata:
+                print(f"MetaMan Debug: Falling back to PIL image extraction...")
                 source_metadata = self._extract_source_metadata(pil_image)
                 
                 # If still no metadata found, try to find and read the original file
@@ -559,6 +561,8 @@ class MetaManUniversalNodeV2:
                     if original_file_metadata:
                         source_metadata = original_file_metadata
                         print(f"MetaMan Debug: Successfully read metadata from original file")
+                    else:
+                        print(f"MetaMan Debug: No metadata found anywhere - recommend using MetaManLoadImage node")
             
             source_service = self._detect_source_service(source_metadata)
             
