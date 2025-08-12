@@ -267,8 +267,17 @@ class MetaManUniversalNodeV2:
             else:
                 pil_image = image
             
-            # Extract source metadata and detect service
+            # Check if we can extract metadata from the PIL image
             source_metadata = self._extract_source_metadata(pil_image)
+            
+            # If no metadata found, try to find and read the original file
+            if not source_metadata:
+                print(f"MetaMan Debug: No metadata in PIL image, attempting direct file reading...")
+                original_file_metadata = self._try_read_original_file(pil_image)
+                if original_file_metadata:
+                    source_metadata = original_file_metadata
+                    print(f"MetaMan Debug: Successfully read metadata from original file")
+            
             source_service = self._detect_source_service(source_metadata)
             
             # Convert to universal format
@@ -963,6 +972,129 @@ class MetaManUniversalNodeV2:
         
         print(f"MetaMan Debug: Final extracted params: {list(params.keys())}")
         return params
+    
+    def _try_read_original_file(self, pil_image) -> dict:
+        """Attempt to find and read the original PNG file with metadata"""
+        metadata = {}
+        
+        try:
+            import glob
+            
+            # Common ComfyUI directories to search
+            search_paths = [
+                "/Users/pxl8d/Art/ComfyUI/input/*.png",
+                "/Users/pxl8d/Art/ComfyUI/output/*.png", 
+                "/Users/pxl8d/Art/ComfyUI/temp/*.png"
+            ]
+            
+            # Get image dimensions for matching
+            img_size = pil_image.size if hasattr(pil_image, 'size') else None
+            print(f"MetaMan Debug: Looking for original file with size {img_size}")
+            
+            # Search for PNG files in common locations
+            candidates = []
+            for search_path in search_paths:
+                try:
+                    files = glob.glob(search_path)
+                    candidates.extend(files)
+                    print(f"MetaMan Debug: Found {len(files)} PNG files in {search_path}")
+                except Exception as e:
+                    print(f"MetaMan Debug: Error searching {search_path}: {e}")
+            
+            # Sort by modification time (newest first)
+            candidates.sort(key=lambda x: os.path.getmtime(x) if os.path.exists(x) else 0, reverse=True)
+            print(f"MetaMan Debug: Checking {len(candidates)} candidate files...")
+            
+            # Try to find a matching file
+            for file_path in candidates[:10]:  # Check up to 10 most recent files
+                try:
+                    print(f"MetaMan Debug: Checking file: {file_path}")
+                    
+                    # Open file directly with PIL to preserve metadata
+                    with Image.open(file_path) as test_image:
+                        # Check if dimensions match
+                        if img_size and test_image.size != img_size:
+                            print(f"MetaMan Debug: Size mismatch: {test_image.size} vs {img_size}")
+                            continue
+                        
+                        print(f"MetaMan Debug: Size match found: {test_image.size}")
+                        
+                        # Check for PNG text chunks
+                        if hasattr(test_image, 'text') and test_image.text:
+                            print(f"MetaMan Debug: File has PNG text chunks: {list(test_image.text.keys())}")
+                            
+                            # Extract metadata from this file
+                            file_metadata = self._extract_metadata_from_file_image(test_image)
+                            if file_metadata:
+                                print(f"MetaMan Debug: Successfully extracted metadata from {file_path}")
+                                return file_metadata
+                        else:
+                            print(f"MetaMan Debug: File has no PNG text chunks")
+                            
+                except Exception as e:
+                    print(f"MetaMan Debug: Error reading {file_path}: {e}")
+                    continue
+            
+            print(f"MetaMan Debug: No matching file with metadata found")
+            
+        except Exception as e:
+            print(f"MetaMan Debug: Error in file search: {e}")
+        
+        return metadata
+    
+    def _extract_metadata_from_file_image(self, file_image) -> dict:
+        """Extract metadata from a file-loaded PIL image (preserves PNG chunks)"""
+        metadata = {}
+        
+        try:
+            # Check PNG text chunks
+            if hasattr(file_image, 'text') and file_image.text:
+                print(f"MetaMan Debug: File image has text chunks: {list(file_image.text.keys())}")
+                
+                # A1111/Civitai parameters format
+                if 'parameters' in file_image.text:
+                    print(f"MetaMan Debug: Found 'parameters' chunk in file")
+                    metadata.update(self._parse_a1111_parameters(file_image.text['parameters']))
+                
+                # ComfyUI workflow format  
+                if 'workflow' in file_image.text:
+                    print(f"MetaMan Debug: Found 'workflow' chunk in file")
+                    try:
+                        workflow_data = json.loads(file_image.text['workflow'])
+                        metadata['comfyui_workflow'] = workflow_data
+                        print(f"MetaMan Debug: Successfully parsed workflow with {len(workflow_data.get('nodes', []))} nodes")
+                    except Exception as e:
+                        print(f"MetaMan Debug: Error parsing workflow from file: {e}")
+                
+                # ComfyUI prompt format
+                if 'prompt' in file_image.text:
+                    print(f"MetaMan Debug: Found 'prompt' chunk in file")
+                    try:
+                        prompt_data = json.loads(file_image.text['prompt'])
+                        metadata['comfyui_prompt'] = prompt_data
+                        print(f"MetaMan Debug: Successfully parsed prompt with {len(prompt_data)} nodes")
+                        
+                        # Extract basic parameters from prompt data
+                        extracted_params = self._extract_params_from_comfyui_prompt(prompt_data)
+                        metadata.update(extracted_params)
+                        print(f"MetaMan Debug: Extracted params from file prompt: {list(extracted_params.keys())}")
+                    except Exception as e:
+                        print(f"MetaMan Debug: Error parsing prompt from file: {e}")
+                
+                # Custom "meta" chunk
+                if 'meta' in file_image.text:
+                    print(f"MetaMan Debug: Found 'meta' chunk in file")
+                    try:
+                        meta_data = json.loads(file_image.text['meta'])
+                        metadata.update(meta_data)
+                    except Exception as e:
+                        print(f"MetaMan Debug: Error parsing meta chunk from file: {e}")
+        
+        except Exception as e:
+            print(f"MetaMan Debug: Error extracting metadata from file image: {e}")
+        
+        print(f"MetaMan Debug: File metadata extraction complete. Keys: {list(metadata.keys())}")
+        return metadata
 
 
 # Node mappings for ComfyUI
