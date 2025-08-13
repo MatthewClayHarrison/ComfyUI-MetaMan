@@ -688,6 +688,14 @@ class MetaManLoadImage:
                             if key == 'prompt':
                                 extracted_params = self._extract_params_from_comfyui_prompt(json_data)
                                 metadata.update(extracted_params)
+                                
+                                # Phase: De-obfuscate Tensor.AI model names if available (after parameter extraction)
+                                if extracted_params:
+                                    deobfuscated_info = self._deobfuscate_tensor_ai_models(metadata, extracted_params.get('loras', []))
+                                    if deobfuscated_info:
+                                        metadata.update(deobfuscated_info)
+                                        print(f"MetaMan Load Image: De-obfuscated Tensor.AI models: {list(deobfuscated_info.keys())}")
+                                
                                 print(f"MetaMan Load Image: Extracted ComfyUI params: {list(extracted_params.keys())}")
                                 
                         except Exception as e:
@@ -813,12 +821,6 @@ class MetaManLoadImage:
             if model_info:
                 params.update(model_info)
                 print(f"MetaMan Universal: Resolved models: {model_info}")
-                
-            # Phase 6.5: De-obfuscate Tensor.AI model names if available
-            deobfuscated_info = self._deobfuscate_tensor_ai_models(metadata, params.get('loras', []))
-            if deobfuscated_info:
-                params.update(deobfuscated_info)
-                print(f"MetaMan Universal: De-obfuscated Tensor.AI models: {deobfuscated_info}")
                 
             # Phase 6.7: Extract VAE information
             vae_info = self._extract_vae_info(prompt_data)
@@ -1331,7 +1333,13 @@ class MetaManLoadImage:
                         print(f"MetaMan Universal: Traced to model: {model_name}")
             
             # Remove duplicates and set model info
-            unique_models = list(set(used_models))
+            unique_models = []
+            for model in used_models:
+                # Skip None values and node references that weren't resolved
+                if model and isinstance(model, str) and not model.startswith('['):
+                    if model not in unique_models:
+                        unique_models.append(model)
+            
             if unique_models:
                 if len(unique_models) == 1:
                     model_info['model_name'] = unique_models[0]
@@ -1340,6 +1348,8 @@ class MetaManLoadImage:
                     model_info['additional_models'] = unique_models[1:]  # Additional models
                 
                 print(f"MetaMan Universal: Final model resolution: {unique_models}")
+            else:
+                print(f"MetaMan Universal: No resolvable model names found")
             
         except Exception as e:
             print(f"MetaMan Universal: Error resolving model names: {e}")
@@ -1369,16 +1379,22 @@ class MetaManLoadImage:
             
             for field in model_fields:
                 if field in inputs and inputs[field]:
-                    model_name = inputs[field]
-                    print(f"MetaMan Universal: Found model '{model_name}' in {node_id}.{field}")
-                    return model_name
+                    model_value = inputs[field]
+                    # Check if this is a string (actual model name) or a list (node reference)
+                    if isinstance(model_value, str):
+                        print(f"MetaMan Universal: Found model '{model_value}' in {node_id}.{field}")
+                        return model_value
+                    elif isinstance(model_value, list) and len(model_value) >= 2:
+                        # This is a node reference, trace further
+                        source_node_id = str(model_value[0])
+                        print(f"MetaMan Universal: Node {node_id}.{field} references node {source_node_id}, tracing further...")
+                        return self._trace_model_source(prompt_data, source_node_id)
             
-            # If this node doesn't have a direct model name, trace further
-            # Look for model input that might be a reference to another node
+            # If this node doesn't have a direct model name, look for model input that might be a reference to another node
             model_input = inputs.get('model')
             if model_input and isinstance(model_input, list) and len(model_input) >= 2:
                 source_node_id = str(model_input[0])
-                print(f"MetaMan Universal: Node {node_id} model input references node {source_node_id}")
+                print(f"MetaMan Universal: Node {node_id} model input references node {source_node_id}, tracing further...")
                 return self._trace_model_source(prompt_data, source_node_id)
             
             return None
@@ -1519,30 +1535,44 @@ class MetaManLoadImage:
             # Apply de-obfuscation to LoRAs
             if loras:
                 deobfuscated_loras = []
-                for lora in loras:
+                lora_mapping_by_index = {}
+                
+                # Create a mapping by order (index) since EMS codes don't directly match filenames
+                for i, model_data in enumerate(models_data):
+                    if model_data.get('type') == 'LORA':
+                        lora_mapping_by_index[i] = {
+                            'real_name': model_data.get('modelFileName', ''),
+                            'hash': model_data.get('hash', ''),
+                            'weight': model_data.get('weight', 1.0),
+                            'label': model_data.get('label', '')
+                        }
+                
+                print(f"MetaMan De-obfuscation: Created mapping for {len(lora_mapping_by_index)} LoRAs by index")
+                
+                # Map LoRAs by order/index since EMS names don't match real names
+                for i, lora in enumerate(loras):
                     lora_name = lora.get('name', '') if isinstance(lora, dict) else str(lora)
+                    lora_weight = lora.get('weight', 1.0) if isinstance(lora, dict) else 1.0
                     
-                    # Find matching real name
-                    real_lora_info = None
-                    for real_name, mapping_data in ems_mapping.items():
-                        if mapping_data['type'] == 'lora':
-                            # Create enhanced LoRA info
-                            enhanced_lora = {
-                                'name': lora_name,  # Keep original EMS name
-                                'real_name': real_name,  # Add real name
-                                'weight': lora.get('weight', mapping_data['weight']) if isinstance(lora, dict) else mapping_data['weight'],
-                                'hash': mapping_data['hash'],
-                                'label': mapping_data['label']
-                            }
-                            deobfuscated_loras.append(enhanced_lora)
-                            print(f"MetaMan De-obfuscation: Enhanced LoRA - {lora_name} → {real_name}")
-                            break
+                    if i in lora_mapping_by_index:
+                        mapping_data = lora_mapping_by_index[i]
+                        enhanced_lora = {
+                            'name': lora_name,  # Keep original EMS name
+                            'real_name': mapping_data['real_name'],  # Add real name
+                            'weight': lora_weight,  # Use weight from extraction
+                            'hash': mapping_data['hash'],
+                            'label': mapping_data['label']
+                        }
+                        deobfuscated_loras.append(enhanced_lora)
+                        print(f"MetaMan De-obfuscation: Enhanced LoRA {i} - {lora_name} → {mapping_data['real_name']}")
                     else:
                         # Keep original if no mapping found
                         deobfuscated_loras.append(lora)
+                        print(f"MetaMan De-obfuscation: No mapping for LoRA {i}, keeping original: {lora_name}")
                 
                 if deobfuscated_loras:
                     deobfuscated['loras_enhanced'] = deobfuscated_loras
+                    print(f"MetaMan De-obfuscation: Created {len(deobfuscated_loras)} enhanced LoRAs")
             
             # Store the EMS mapping for future reference
             if ems_mapping:
