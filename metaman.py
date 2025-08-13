@@ -793,9 +793,11 @@ class MetaManLoadImage:
             
             # Phase 4: Extract LoRAs from all text content
             all_loras = self._extract_loras_universal(all_text_content)
+            print(f"MetaMan Universal: DEBUG - LoRAs extraction returned: {all_loras}")
             
             # Phase 5: Extract embeddings from all text content
             all_embeddings = self._extract_embeddings_universal(all_text_content)
+            print(f"MetaMan Universal: DEBUG - Embeddings extraction returned: {all_embeddings}")
             
             # Phase 6: Compile final results
             if classified_prompts['positive']:
@@ -809,6 +811,10 @@ class MetaManLoadImage:
             if all_loras:
                 params['loras'] = all_loras
                 print(f"MetaMan Universal: Extracted {len(all_loras)} LoRAs: {[lora['name'] for lora in all_loras]}")
+            
+            if all_embeddings:
+                params['embeddings'] = all_embeddings
+                print(f"MetaMan Universal: Extracted {len(all_embeddings)} embeddings: {[emb['name'] for emb in all_embeddings]}")
             
             print(f"MetaMan Universal: Extraction complete: {list(params.keys())}")
             
@@ -1191,6 +1197,8 @@ class MetaManLoadImage:
                     seen_loras.add(lora_key)
                     all_loras.append(lora)
                     print(f"MetaMan Universal: Found LoRA '{lora['name']}' (weight: {lora['weight']}) in {candidate['source']}")
+        
+        return all_loras
         
     def _extract_embeddings_universal(self, text_candidates: list) -> list:
         """Extract embeddings from all text content"""
