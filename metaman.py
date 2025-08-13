@@ -965,6 +965,11 @@ class MetaManLoadImage:
         field_name = candidate['field_name'].lower()
         node_type = candidate['node_type']
         
+        # CRITICAL: Exclude LoRA-only content from prompt scoring
+        if self._is_lora_only_content(text, node_type):
+            print(f"MetaMan Universal: EXCLUDING LoRA-only content from prompt scoring: {candidate['source']}")
+            return 0.0  # LoRA-only content should not be considered as positive prompt
+        
         # ENHANCED: Field name indicators (strong signals)
         if 'positive' in field_name or 'prompt' in field_name:
             score += 3.0
@@ -988,11 +993,16 @@ class MetaManLoadImage:
         keyword_count = sum(1 for keyword in positive_keywords if keyword in text_lower)
         score += keyword_count * 0.5
         
-        # LoRA presence (strong indicator of main prompt)
+        # LoRA presence (moderate indicator of main prompt, but not if it's LoRA-only)
         if '<lora:' in text:
-            lora_count = text.count('<lora:')
-            score += lora_count * 2.0  # Increased weight - LoRAs are almost always in positive prompts
-            print(f"MetaMan Universal: Found {lora_count} LoRAs in {candidate['source']} (+{lora_count * 2.0} score)")
+            # Count human-readable content vs LoRA content
+            human_content = self._extract_human_readable_content(text)
+            if len(human_content) > 20:  # Has substantial human content
+                lora_count = text.count('<lora:')
+                score += lora_count * 1.0  # Reduced from 2.0 - LoRAs are good but not overwhelming
+                print(f"MetaMan Universal: Found {lora_count} LoRAs with human content in {candidate['source']} (+{lora_count} score)")
+            else:
+                print(f"MetaMan Universal: LoRAs found but minimal human content in {candidate['source']} (no LoRA bonus)")
         
         # ENHANCED: Length scoring with better thresholds
         text_length = len(text)
@@ -1016,6 +1026,31 @@ class MetaManLoadImage:
             score -= 2.0  # Likely negative prompt
         
         return max(0.0, score)
+    
+    def _is_lora_only_content(self, text: str, node_type: str) -> bool:
+        """Check if text contains only LoRA tags and no meaningful human content"""
+        # Check node type first - LoraTagLoader is specifically for LoRA loading
+        if 'lora' in node_type.lower() and 'tag' in node_type.lower():
+            return True
+            
+        # Check if text is primarily LoRA tags
+        human_content = self._extract_human_readable_content(text)
+        lora_content_length = len(text) - len(human_content)
+        
+        # If most of the content is LoRA tags and little human content, consider it LoRA-only
+        if len(human_content.strip()) < 10 and lora_content_length > len(human_content) * 2:
+            return True
+            
+        return False
+    
+    def _extract_human_readable_content(self, text: str) -> str:
+        """Extract human-readable content by removing LoRA tags"""
+        import re
+        # Remove LoRA tags
+        no_loras = re.sub(r'<lora:[^>]*>', '', text, flags=re.IGNORECASE)
+        # Remove extra whitespace and commas
+        cleaned = re.sub(r'[,\s]+', ' ', no_loras).strip()
+        return cleaned
     
     def _score_as_negative_prompt(self, candidate: dict) -> float:
         """Score text as likely negative prompt"""
