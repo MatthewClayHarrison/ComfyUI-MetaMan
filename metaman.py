@@ -433,8 +433,20 @@ class MetaManExtractComponents:
             sampler = str(metadata.get('sampler', 'euler'))
             scheduler = str(metadata.get('scheduler', 'normal'))
             seed = int(metadata.get('seed', -1))
+            
+            # Extract width/height from image_size if available, otherwise from metadata
             width = int(metadata.get('width', 512))
             height = int(metadata.get('height', 512))
+            
+            # Check for image_size at top level of metadata_data (from MetaManLoadImage)
+            if 'image_size' in metadata_data and isinstance(metadata_data['image_size'], list) and len(metadata_data['image_size']) >= 2:
+                width = int(metadata_data['image_size'][0])
+                height = int(metadata_data['image_size'][1])
+                print(f"MetaMan Extract Components: Using image_size dimensions: {width}x{height}")
+            elif 'width' in metadata and 'height' in metadata:
+                print(f"MetaMan Extract Components: Using metadata dimensions: {width}x{height}")
+            else:
+                print(f"MetaMan Extract Components: Using default dimensions: {width}x{height}")
             
             # Model name with de-obfuscation support
             model_name = str(metadata.get('model_name_real', metadata.get('model_name', '')))
@@ -954,7 +966,7 @@ class MetaManLoadImage:
             class_type = node_data.get('class_type', '')
             inputs = node_data.get('inputs', {})
             
-            # Enhanced text field detection
+            # Enhanced text field detection from inputs
             for field_name, field_value in inputs.items():
                 if isinstance(field_value, str) and len(field_value.strip()) > 5:
                     text_candidates.append({
@@ -969,6 +981,24 @@ class MetaManLoadImage:
                     })
                     
                     print(f"MetaMan Universal: Found text in {node_id}.{field_name} ({class_type}): {len(field_value)} chars")
+            
+            # IMPORTANT: Also scan widget_values for text content (this is where Power Prompt embeddings are stored)
+            widget_values = node_data.get('widget_values', [])
+            if isinstance(widget_values, list):
+                for i, widget_value in enumerate(widget_values):
+                    if isinstance(widget_value, str) and len(widget_value.strip()) > 5:
+                        text_candidates.append({
+                            'text': widget_value,
+                            'source': f"{node_id}.widget_{i}",
+                            'node_id': node_id,
+                            'field_name': f"widget_{i}",
+                            'node_type': class_type,
+                            'length': len(widget_value),
+                            'is_text_field': True,  # Widget values often contain prompts/embeddings
+                            'is_processed_field': False
+                        })
+                        
+                        print(f"MetaMan Universal: Found text in {node_id}.widget_{i} ({class_type}): {len(widget_value)} chars")
         
         return text_candidates
     
