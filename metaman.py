@@ -846,12 +846,17 @@ class MetaManLoadImage:
             all_text_content = self._scan_all_text_content_universal(prompt_data)
             print(f"MetaMan Universal: Found {len(all_text_content)} text candidates from prompt data")
             
-            # Phase 2.5: CRITICAL - Direct workflow scanning for embeddings (simplified approach)
+            # Phase 2.5: EMERGENCY - Direct search for embedding text anywhere in metadata
+            emergency_embeddings = self._emergency_scan_for_embeddings()
+            if emergency_embeddings:
+                print(f"MetaMan EMERGENCY: Found {len(emergency_embeddings)} embeddings via direct scan!")
+            
+            # Phase 2.6: CRITICAL - Direct workflow scanning for embeddings (simplified approach)
             workflow_embeddings = self._extract_embeddings_from_workflow_direct()
             if workflow_embeddings:
                 print(f"MetaMan Universal: Found {len(workflow_embeddings)} embeddings directly from workflow data")
             
-            # Phase 2.6: Also try the old workflow scanning method as backup
+            # Phase 2.7: Also try the old workflow scanning method as backup
             workflow_text_content = self._scan_workflow_widget_values()
             if workflow_text_content:
                 all_text_content.extend(workflow_text_content)
@@ -899,18 +904,28 @@ class MetaManLoadImage:
                 params['loras'] = all_loras
                 print(f"MetaMan Universal: Extracted {len(all_loras)} LoRAs: {[lora['name'] for lora in all_loras]}")
             
-            # Combine universal embeddings with direct workflow embeddings
+            # Combine all embedding sources
+            final_embeddings = all_embeddings.copy()
+            
+            # Add emergency embeddings first (highest priority)
+            if emergency_embeddings:
+                for emb in emergency_embeddings:
+                    emb_name = emb['name'].lower()
+                    if not any(existing['name'].lower() == emb_name for existing in final_embeddings):
+                        final_embeddings.append(emb)
+                        print(f"MetaMan Universal: Added EMERGENCY embedding: {emb['name']}")
+            
+            # Add workflow embeddings next
             if workflow_embeddings:
-                # Add workflow embeddings to the universal list, avoiding duplicates
                 for workflow_emb in workflow_embeddings:
                     emb_name = workflow_emb['name'].lower()
-                    if not any(emb['name'].lower() == emb_name for emb in all_embeddings):
-                        all_embeddings.append(workflow_emb)
+                    if not any(existing['name'].lower() == emb_name for existing in final_embeddings):
+                        final_embeddings.append(workflow_emb)
                         print(f"MetaMan Universal: Added workflow embedding: {workflow_emb['name']}")
             
-            if all_embeddings:
-                params['embeddings'] = all_embeddings
-                print(f"MetaMan Universal: Final extracted {len(all_embeddings)} embeddings: {[emb['name'] for emb in all_embeddings]}")
+            if final_embeddings:
+                params['embeddings'] = final_embeddings
+                print(f"MetaMan Universal: Final extracted {len(final_embeddings)} embeddings: {[emb['name'] for emb in final_embeddings]}")
             
             print(f"MetaMan Universal: Extraction complete: {list(params.keys())}")
             
@@ -918,8 +933,9 @@ class MetaManLoadImage:
             print(f"MetaMan Universal Extraction Error: {e}")
             import traceback
             traceback.print_exc()
-            # Initialize workflow_embeddings as empty list if there was an error
+            # Initialize variables as empty if there was an error
             workflow_embeddings = []
+            emergency_embeddings = []
         
         return params
     
@@ -1011,6 +1027,53 @@ class MetaManLoadImage:
                     print(f"MetaMan Universal: Found text in {node_id}.{field_name} ({class_type}): {len(field_value)} chars")
         
         return text_candidates
+    
+    def _emergency_scan_for_embeddings(self) -> list:
+        """Emergency function to scan ALL metadata for embedding: text"""
+        embeddings = []
+        found_embedding_texts = []
+        
+        try:
+            if not hasattr(self, '_current_metadata'):
+                print(f"MetaMan EMERGENCY: No metadata available")
+                return embeddings
+            
+            print(f"MetaMan EMERGENCY: Scanning ALL metadata for 'embedding:' text...")
+            
+            def scan_any_value(value, path=""):
+                """Recursively scan any value for embedding text"""
+                if isinstance(value, str):
+                    if 'embedding:' in value and value not in ['CHOOSE', 'Select']:
+                        print(f"MetaMan EMERGENCY: Found embedding text at {path}: '{value[:100]}...'")
+                        found_embedding_texts.append({'path': path, 'text': value})
+                elif isinstance(value, dict):
+                    for k, v in value.items():
+                        scan_any_value(v, f"{path}.{k}")
+                elif isinstance(value, list):
+                    for i, v in enumerate(value):
+                        scan_any_value(v, f"{path}[{i}]")
+            
+            # Scan EVERYTHING in current metadata
+            for key, value in self._current_metadata.items():
+                scan_any_value(value, key)
+            
+            print(f"MetaMan EMERGENCY: Found {len(found_embedding_texts)} embedding texts")
+            
+            # Extract embeddings from all found texts
+            for item in found_embedding_texts:
+                text_embeddings = self._extract_embeddings_from_text(item['text'])
+                for emb in text_embeddings:
+                    # Avoid duplicates
+                    if not any(existing['name'].lower() == emb['name'].lower() for existing in embeddings):
+                        emb['source_path'] = item['path']  # Add source info
+                        embeddings.append(emb)
+                        print(f"MetaMan EMERGENCY: Extracted '{emb['name']}' from {item['path']}")
+            
+            return embeddings
+            
+        except Exception as e:
+            print(f"MetaMan EMERGENCY Error: {e}")
+            return embeddings
     
     def _extract_embeddings_from_workflow_direct(self) -> list:
         """Direct extraction of embeddings from workflow data - simplified approach"""
