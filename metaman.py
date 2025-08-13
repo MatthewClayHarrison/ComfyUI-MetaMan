@@ -401,8 +401,8 @@ class MetaManExtractComponents:
         }
     
     CATEGORY = "MetaMan"
-    RETURN_TYPES = ("STRING", "STRING", "INT", "FLOAT", "STRING", "STRING", "INT", "INT", "INT", "STRING", "STRING", "FLOAT")
-    RETURN_NAMES = ("positive_prompt", "negative_prompt", "steps", "cfg_scale", "sampler", "scheduler", "seed", "width", "height", "model_name", "loras", "denoising_strength")
+    RETURN_TYPES = ("STRING", "STRING", "INT", "FLOAT", "STRING", "STRING", "INT", "INT", "INT", "STRING", "*", "*", "FLOAT")
+    RETURN_NAMES = ("positive_prompt", "negative_prompt", "steps", "cfg_scale", "sampler", "scheduler", "seed", "width", "height", "model_name", "loras", "embeddings", "denoising_strength")
     FUNCTION = "extract_components"
     DESCRIPTION = "Extract individual workflow components for reuse in current workflow"
     
@@ -438,20 +438,20 @@ class MetaManExtractComponents:
             model_name = str(metadata.get('model_name', ''))
             denoising_strength = float(metadata.get('denoising_strength', 1.0))
             
-            # Format LoRAs as a readable string
-            loras_str = ""
+            # Format LoRAs as a list instead of string
+            loras_list = []
             if 'loras' in metadata and isinstance(metadata['loras'], list):
-                lora_parts = []
-                for lora in metadata['loras']:
-                    if isinstance(lora, dict):
-                        name = lora.get('name', '')
-                        weight = lora.get('weight', 1.0)
-                        lora_parts.append(f"{name}:{weight}")
-                loras_str = ", ".join(lora_parts)
+                loras_list = metadata['loras']  # Return the actual list
+            
+            # Format embeddings as a list
+            embeddings_list = []
+            if 'embeddings' in metadata and isinstance(metadata['embeddings'], list):
+                embeddings_list = metadata['embeddings']  # Return the actual list
             
             print(f"MetaMan Extract Components: Successfully extracted {len([x for x in [positive_prompt, negative_prompt, model_name] if x])} text components")
+            print(f"MetaMan Extract Components: Extracted {len(loras_list)} LoRAs and {len(embeddings_list)} embeddings")
             
-            return (positive_prompt, negative_prompt, steps, cfg_scale, sampler, scheduler, seed, width, height, model_name, loras_str, denoising_strength)
+            return (positive_prompt, negative_prompt, steps, cfg_scale, sampler, scheduler, seed, width, height, model_name, loras_list, embeddings_list, denoising_strength)
             
         except Exception as e:
             print(f"MetaMan Extract Components Error: {e}")
@@ -459,7 +459,7 @@ class MetaManExtractComponents:
     
     def _return_empty_components(self):
         """Return empty/default values for all components"""
-        return ("", "", 20, 7.0, "euler", "normal", -1, 512, 512, "", "", 1.0)
+        return ("", "", 20, 7.0, "euler", "normal", -1, 512, 512, "", [], [], 1.0)
 
 
 class MetaManEmbedAndSave:
@@ -794,7 +794,10 @@ class MetaManLoadImage:
             # Phase 4: Extract LoRAs from all text content
             all_loras = self._extract_loras_universal(all_text_content)
             
-            # Phase 5: Compile final results
+            # Phase 5: Extract embeddings from all text content
+            all_embeddings = self._extract_embeddings_universal(all_text_content)
+            
+            # Phase 6: Compile final results
             if classified_prompts['positive']:
                 params['prompt'] = classified_prompts['positive']['text']
                 print(f"MetaMan Universal: POSITIVE from {classified_prompts['positive']['source']}: {params['prompt'][:100]}...")
@@ -970,6 +973,11 @@ class MetaManLoadImage:
             print(f"MetaMan Universal: EXCLUDING LoRA-only content from prompt scoring: {candidate['source']}")
             return 0.0  # LoRA-only content should not be considered as positive prompt
         
+        # CRITICAL: Strong negative indicators should disqualify from positive scoring
+        if self._is_clearly_negative_content(text):
+            print(f"MetaMan Universal: EXCLUDING clearly negative content from positive scoring: {candidate['source']}")
+            return 0.0  # Obviously negative content should not be positive prompt
+        
         # ENHANCED: Field name indicators (strong signals)
         if 'positive' in field_name or 'prompt' in field_name:
             score += 3.0
@@ -1004,10 +1012,12 @@ class MetaManLoadImage:
             else:
                 print(f"MetaMan Universal: LoRAs found but minimal human content in {candidate['source']} (no LoRA bonus)")
         
-        # ENHANCED: Length scoring with better thresholds
+        # ENHANCED: Length scoring with better thresholds (but capped to prevent negative dominance)
         text_length = len(text)
-        if text_length > 500:
-            score += 3.0  # Very long text likely main prompt
+        if text_length > 1000:
+            score += 1.5  # Reduced for very long text - might be negative prompt
+        elif text_length > 500:
+            score += 2.5  # Reduced
         elif text_length > 200:
             score += 2.0
         elif text_length > 100:
@@ -1019,13 +1029,60 @@ class MetaManLoadImage:
         if 'BREAK' in text.upper():
             score += 1.0  # BREAK is common in detailed positive prompts
         
-        # Negative indicators (reduce score)
+        # Enhanced negative indicators (reduce score more aggressively)
         negative_keywords = ['worst', 'low quality', 'bad', 'ugly', 'blurry', 'deformed']
         negative_count = sum(1 for keyword in negative_keywords if keyword in text_lower)
         if negative_count > 2:
-            score -= 2.0  # Likely negative prompt
+            score -= 3.0  # Increased penalty - likely negative prompt
+        if negative_count > 5:
+            score -= 5.0  # Very likely negative prompt
         
         return max(0.0, score)
+    
+    def _is_clearly_negative_content(self, text: str) -> bool:
+        """Detect obviously negative content that should never be positive prompt"""
+        text_lower = text.lower()
+        
+        # Check for embedding syntax
+        if 'embedding:' in text_lower:
+            print(f"MetaMan Universal: Found embedding syntax - likely negative prompt")
+            return True
+        
+        # Well-known negative embedding/model names
+        negative_embeddings = [
+            'baddream', 'fastnegative', 'easynegative', 'verybadimagenegative',
+            'ng_deepnegative', 'negative_hand', 'bad-hands', 'badhandv4',
+            'unrealengine', 'badprompt', 'bad-artist', 'bad_prompt_version'
+        ]
+        
+        for neg_embed in negative_embeddings:
+            if neg_embed in text_lower:
+                print(f"MetaMan Universal: Found negative embedding '{neg_embed}' - clearly negative content")
+                return True
+        
+        # Count negative keywords as percentage of content
+        negative_keywords = [
+            'worst', 'low quality', 'bad', 'ugly', 'blurry', 'deformed', 'distorted',
+            'mutation', 'mutated', 'disfigured', 'dismembered', 'malformed',
+            'poorly drawn', 'extra', 'missing', 'cropped', 'watermark', 'text',
+            'signature', 'username', 'lowres', 'artifacts', 'duplicate', 'morbid',
+            'mutilated', 'fused fingers', 'unclear eyes', 'bad anatomy', 'bad hands'
+        ]
+        
+        neg_count = sum(1 for keyword in negative_keywords if keyword in text_lower)
+        
+        # If text has high concentration of negative keywords, it's clearly negative
+        if neg_count > 10:  # Lots of negative keywords
+            print(f"MetaMan Universal: High negative keyword density ({neg_count}) - clearly negative content")
+            return True
+        
+        # If negative keywords make up significant portion of unique words
+        words = set(text_lower.split())
+        if len(words) > 0 and neg_count / len(words) > 0.3:  # 30% negative keywords
+            print(f"MetaMan Universal: High negative keyword ratio ({neg_count}/{len(words)}) - clearly negative content")
+            return True
+        
+        return False
     
     def _is_lora_only_content(self, text: str, node_type: str) -> bool:
         """Check if text contains only LoRA tags and no meaningful human content"""
@@ -1135,7 +1192,64 @@ class MetaManLoadImage:
                     all_loras.append(lora)
                     print(f"MetaMan Universal: Found LoRA '{lora['name']}' (weight: {lora['weight']}) in {candidate['source']}")
         
-        return all_loras
+    def _extract_embeddings_universal(self, text_candidates: list) -> list:
+        """Extract embeddings from all text content"""
+        all_embeddings = []
+        seen_embeddings = set()
+        
+        for candidate in text_candidates:
+            embeddings_in_text = self._extract_embeddings_from_text(candidate['text'])
+            for embedding in embeddings_in_text:
+                embedding_key = embedding['name'].lower()
+                if embedding_key not in seen_embeddings:
+                    seen_embeddings.add(embedding_key)
+                    all_embeddings.append(embedding)
+                    print(f"MetaMan Universal: Found embedding '{embedding['name']}' in {candidate['source']}")
+        
+        return all_embeddings
+    
+    def _extract_embeddings_from_text(self, text: str) -> list:
+        """Extract embedding information from text using regex and known patterns"""
+        import re
+        
+        embeddings = []
+        text_lower = text.lower()
+        
+        # Pattern 1: embedding:name syntax
+        embedding_pattern = r'embedding:([\w\-_\.]+)'
+        matches = re.findall(embedding_pattern, text, re.IGNORECASE)
+        
+        for match in matches:
+            name = match.strip()
+            embeddings.append({
+                'name': name,
+                'type': 'embedding'
+            })
+        
+        # Pattern 2: Well-known negative embedding names (even without embedding: prefix)
+        negative_embeddings = [
+            'baddream', 'fastnegative', 'fastnegativev2', 'easynegative', 'verybadimagenegative',
+            'ng_deepnegative', 'negative_hand', 'bad-hands', 'badhandv4', 'badhandv5',
+            'unrealengine', 'badprompt', 'bad-artist', 'bad_prompt_version', 'badpromptversion',
+            'ng_deepnegative_v1_75t', 'negativexl', 'ac_neg1', 'ac_neg2'
+        ]
+        
+        for neg_embed in negative_embeddings:
+            # Look for exact word matches (not partial)
+            pattern = r'\b' + re.escape(neg_embed) + r'\b'
+            if re.search(pattern, text_lower):
+                embedding_name = neg_embed
+                # If found via pattern, use the actual case from text if possible
+                actual_match = re.search(pattern, text, re.IGNORECASE)
+                if actual_match:
+                    embedding_name = actual_match.group()
+                
+                embeddings.append({
+                    'name': embedding_name,
+                    'type': 'negative_embedding'
+                })
+        
+        return embeddings
 
 
 class MetaManUniversalNodeV2:
