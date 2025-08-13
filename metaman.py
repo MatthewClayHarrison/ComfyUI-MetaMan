@@ -982,10 +982,13 @@ class MetaManLoadImage:
                     
                     print(f"MetaMan Universal: Found text in {node_id}.{field_name} ({class_type}): {len(field_value)} chars")
             
-            # IMPORTANT: Also scan widget_values for text content (this is where Power Prompt embeddings are stored)
+            # CRITICAL: Also scan widget_values for text content (this is where Power Prompt embeddings are stored)
             widget_values = node_data.get('widget_values', [])
-            if isinstance(widget_values, list):
+            print(f"MetaMan Widget Debug: Node {node_id} ({class_type}) widget_values: {widget_values}")
+            
+            if isinstance(widget_values, list) and len(widget_values) > 0:
                 for i, widget_value in enumerate(widget_values):
+                    print(f"MetaMan Widget Debug: Checking widget_{i}: type={type(widget_value)}, value='{str(widget_value)[:50]}...'")
                     if isinstance(widget_value, str) and len(widget_value.strip()) > 5:
                         text_candidates.append({
                             'text': widget_value,
@@ -999,6 +1002,10 @@ class MetaManLoadImage:
                         })
                         
                         print(f"MetaMan Universal: Found text in {node_id}.widget_{i} ({class_type}): {len(widget_value)} chars")
+                    else:
+                        print(f"MetaMan Widget Debug: Skipping widget_{i} - not string or too short")
+            else:
+                print(f"MetaMan Widget Debug: Node {node_id} has no widget_values or empty list")
         
         return text_candidates
     
