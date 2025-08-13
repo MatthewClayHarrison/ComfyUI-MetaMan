@@ -401,8 +401,8 @@ class MetaManExtractComponents:
         }
     
     CATEGORY = "MetaMan"
-    RETURN_TYPES = ("STRING", "STRING", "INT", "FLOAT", "STRING", "STRING", "INT", "INT", "INT", "STRING", "*", "*", "FLOAT")
-    RETURN_NAMES = ("positive_prompt", "negative_prompt", "steps", "cfg_scale", "sampler", "scheduler", "seed", "width", "height", "model_name", "loras", "embeddings", "denoising_strength")
+    RETURN_TYPES = ("STRING", "STRING", "INT", "FLOAT", "STRING", "STRING", "INT", "INT", "INT", "STRING", "STRING", "*", "*", "FLOAT")
+    RETURN_NAMES = ("positive_prompt", "negative_prompt", "steps", "cfg_scale", "sampler", "scheduler", "seed", "width", "height", "model_name", "vae_name", "loras", "embeddings", "denoising_strength")
     FUNCTION = "extract_components"
     DESCRIPTION = "Extract individual workflow components for reuse in current workflow"
     
@@ -435,23 +435,32 @@ class MetaManExtractComponents:
             seed = int(metadata.get('seed', -1))
             width = int(metadata.get('width', 512))
             height = int(metadata.get('height', 512))
-            model_name = str(metadata.get('model_name', ''))
+            
+            # Model name with de-obfuscation support
+            model_name = str(metadata.get('model_name_real', metadata.get('model_name', '')))
+            
+            # VAE name
+            vae_name = str(metadata.get('vae_name', ''))
+            
             denoising_strength = float(metadata.get('denoising_strength', 1.0))
             
-            # Format LoRAs as a list instead of string
+            # Enhanced LoRAs - prefer de-obfuscated version if available
             loras_list = []
-            if 'loras' in metadata and isinstance(metadata['loras'], list):
-                loras_list = metadata['loras']  # Return the actual list
+            if 'loras_enhanced' in metadata and isinstance(metadata['loras_enhanced'], list):
+                loras_list = metadata['loras_enhanced']  # Use enhanced LoRAs with real names
+                print(f"MetaMan Extract Components: Using enhanced LoRAs with real names")
+            elif 'loras' in metadata and isinstance(metadata['loras'], list):
+                loras_list = metadata['loras']  # Fall back to regular LoRAs
             
             # Format embeddings as a list
             embeddings_list = []
             if 'embeddings' in metadata and isinstance(metadata['embeddings'], list):
                 embeddings_list = metadata['embeddings']  # Return the actual list
             
-            print(f"MetaMan Extract Components: Successfully extracted {len([x for x in [positive_prompt, negative_prompt, model_name] if x])} text components")
+            print(f"MetaMan Extract Components: Successfully extracted {len([x for x in [positive_prompt, negative_prompt, model_name, vae_name] if x])} text components")
             print(f"MetaMan Extract Components: Extracted {len(loras_list)} LoRAs and {len(embeddings_list)} embeddings")
             
-            return (positive_prompt, negative_prompt, steps, cfg_scale, sampler, scheduler, seed, width, height, model_name, loras_list, embeddings_list, denoising_strength)
+            return (positive_prompt, negative_prompt, steps, cfg_scale, sampler, scheduler, seed, width, height, model_name, vae_name, loras_list, embeddings_list, denoising_strength)
             
         except Exception as e:
             print(f"MetaMan Extract Components Error: {e}")
@@ -459,7 +468,7 @@ class MetaManExtractComponents:
     
     def _return_empty_components(self):
         """Return empty/default values for all components"""
-        return ("", "", 20, 7.0, "euler", "normal", -1, 512, 512, "", [], [], 1.0)
+        return ("", "", 20, 7.0, "euler", "normal", -1, 512, 512, "", "", [], [], 1.0)
 
 
 class MetaManEmbedAndSave:
@@ -805,7 +814,19 @@ class MetaManLoadImage:
                 params.update(model_info)
                 print(f"MetaMan Universal: Resolved models: {model_info}")
                 
-            # Phase 6.5: Determine model type from VAE (helps identify SD1.5 vs SDXL vs Flux)
+            # Phase 6.5: De-obfuscate Tensor.AI model names if available
+            deobfuscated_info = self._deobfuscate_tensor_ai_models(metadata, params.get('loras', []))
+            if deobfuscated_info:
+                params.update(deobfuscated_info)
+                print(f"MetaMan Universal: De-obfuscated Tensor.AI models: {deobfuscated_info}")
+                
+            # Phase 6.7: Extract VAE information
+            vae_info = self._extract_vae_info(prompt_data)
+            if vae_info:
+                params.update(vae_info)
+                print(f"MetaMan Universal: Extracted VAE: {vae_info}")
+                
+            # Phase 6.8: Determine model type from VAE (helps identify SD1.5 vs SDXL vs Flux)
             model_type = self._determine_model_type(prompt_data)
             if model_type:
                 params['model_type'] = model_type
@@ -1429,6 +1450,133 @@ class MetaManLoadImage:
         except Exception as e:
             print(f"MetaMan Universal: Error determining model type: {e}")
             return 'Unknown'
+    
+    def _deobfuscate_tensor_ai_models(self, metadata: dict, loras: list) -> dict:
+        """De-obfuscate Tensor.AI EMS model codes using generation_data chunk"""
+        deobfuscated = {}
+        
+        try:
+            # Look for Tensor.AI generation_data chunk
+            generation_data_raw = metadata.get('png_chunk_generation_data') or metadata.get('info_generation_data')
+            if not generation_data_raw:
+                return deobfuscated
+            
+            # Parse the generation data JSON
+            import json
+            generation_data = json.loads(generation_data_raw)
+            
+            # Extract model mappings from generation_data
+            models_data = generation_data.get('models', [])
+            base_model_data = generation_data.get('baseModel', {})
+            
+            print(f"MetaMan De-obfuscation: Found {len(models_data)} models in generation_data")
+            
+            # Create EMS to real name mapping
+            ems_mapping = {}
+            
+            # Map LoRAs
+            for model_data in models_data:
+                if model_data.get('type') == 'LORA':
+                    real_name = model_data.get('modelFileName', '')
+                    model_hash = model_data.get('hash', '')
+                    weight = model_data.get('weight', 1.0)
+                    label = model_data.get('label', '')
+                    
+                    # Store mapping info
+                    ems_mapping[real_name] = {
+                        'hash': model_hash,
+                        'weight': weight,
+                        'label': label,
+                        'type': 'lora'
+                    }
+                    
+                    print(f"MetaMan De-obfuscation: LoRA mapping found - {real_name} (hash: {model_hash[:16]}...)")
+            
+            # Map base model
+            if base_model_data:
+                real_name = base_model_data.get('modelFileName', '')
+                model_hash = base_model_data.get('hash', '')
+                label = base_model_data.get('label', '')
+                
+                ems_mapping[real_name] = {
+                    'hash': model_hash,
+                    'label': label,
+                    'type': 'checkpoint'
+                }
+                
+                print(f"MetaMan De-obfuscation: Checkpoint mapping found - {real_name} (hash: {model_hash[:16]}...)")
+            
+            # Apply de-obfuscation to current model names
+            if hasattr(self, '_current_model_name') or 'model_name' in deobfuscated:
+                current_model = getattr(self, '_current_model_name', None)
+                for real_name, mapping_data in ems_mapping.items():
+                    if mapping_data['type'] == 'checkpoint':
+                        deobfuscated['model_name_real'] = real_name
+                        deobfuscated['model_hash'] = mapping_data['hash']
+                        deobfuscated['model_label'] = mapping_data['label']
+                        break
+            
+            # Apply de-obfuscation to LoRAs
+            if loras:
+                deobfuscated_loras = []
+                for lora in loras:
+                    lora_name = lora.get('name', '') if isinstance(lora, dict) else str(lora)
+                    
+                    # Find matching real name
+                    real_lora_info = None
+                    for real_name, mapping_data in ems_mapping.items():
+                        if mapping_data['type'] == 'lora':
+                            # Create enhanced LoRA info
+                            enhanced_lora = {
+                                'name': lora_name,  # Keep original EMS name
+                                'real_name': real_name,  # Add real name
+                                'weight': lora.get('weight', mapping_data['weight']) if isinstance(lora, dict) else mapping_data['weight'],
+                                'hash': mapping_data['hash'],
+                                'label': mapping_data['label']
+                            }
+                            deobfuscated_loras.append(enhanced_lora)
+                            print(f"MetaMan De-obfuscation: Enhanced LoRA - {lora_name} → {real_name}")
+                            break
+                    else:
+                        # Keep original if no mapping found
+                        deobfuscated_loras.append(lora)
+                
+                if deobfuscated_loras:
+                    deobfuscated['loras_enhanced'] = deobfuscated_loras
+            
+            # Store the EMS mapping for future reference
+            if ems_mapping:
+                deobfuscated['tensor_ai_mappings'] = ems_mapping
+                
+        except Exception as e:
+            print(f"MetaMan De-obfuscation Error: {e}")
+        
+        return deobfuscated
+    
+    def _extract_vae_info(self, prompt_data: dict) -> dict:
+        """Extract VAE information from workflow"""
+        vae_info = {}
+        
+        try:
+            for node_id, node_data in prompt_data.items():
+                if not isinstance(node_data, dict):
+                    continue
+                    
+                class_type = node_data.get('class_type', '')
+                inputs = node_data.get('inputs', {})
+                
+                # Check VAE loaders
+                if 'vae' in class_type.lower() and 'loader' in class_type.lower():
+                    vae_name = inputs.get('vae_name', '')
+                    if vae_name:
+                        vae_info['vae_name'] = vae_name
+                        print(f"MetaMan Universal: Found VAE: {vae_name}")
+                        break
+            
+        except Exception as e:
+            print(f"MetaMan Universal: Error extracting VAE info: {e}")
+        
+        return vae_info
 
 
 class MetaManUniversalNodeV2:
