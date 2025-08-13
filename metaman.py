@@ -520,9 +520,10 @@ class MetaManEmbedAndSave:
             "required": {
                 "image": ("IMAGE",),
                 "metadata_json": ("STRING", {"forceInput": True}),
+                "target_service": (["automatic1111", "comfyui", "civitai", "forge", "tensor.ai", "leonardo.ai"], {"default": "automatic1111"})
             },
             "optional": {
-                "filename_prefix": ("STRING", {"default": "MetaMan_converted"})
+                "directory": ("STRING", {"default": "MetaMan converted"})
             }
         }
     
@@ -533,28 +534,29 @@ class MetaManEmbedAndSave:
     OUTPUT_NODE = True
     DESCRIPTION = "Embed metadata into image and save as PNG file"
     
-    def embed_and_save(self, image, metadata_json, filename_prefix="MetaMan_converted"):
+    def embed_and_save(self, image, metadata_json, target_service, directory="MetaMan converted"):
         """
         Embed metadata into image and save as PNG file to output directory
         """
         try:
-            # Parse metadata JSON to extract target format
+            # Parse metadata JSON and convert to target service format
             if metadata_json and metadata_json.strip():
                 try:
                     metadata_data = json.loads(metadata_json)
-                    # Extract target metadata or use universal metadata
-                    if 'target_metadata' in metadata_data:
-                        metadata_text = metadata_data['target_metadata']
-                        print(f"MetaMan Embed & Save: Using target metadata ({len(metadata_text)} chars)")
-                    elif 'metadata' in metadata_data:
-                        # Convert metadata dict to A1111 format
-                        metadata_text = self._format_metadata_for_embedding(metadata_data['metadata'])
-                        print(f"MetaMan Embed & Save: Converted metadata to A1111 format ({len(metadata_text)} chars)")
+                    
+                    # Extract the source metadata
+                    source_metadata = {}
+                    if 'metadata' in metadata_data:
+                        source_metadata = metadata_data['metadata']
                     else:
-                        metadata_text = json.dumps(metadata_data, indent=2)
-                        print(f"MetaMan Embed & Save: Using raw JSON ({len(metadata_text)} chars)")
+                        source_metadata = metadata_data
+                    
+                    # Convert to target service format
+                    metadata_text = self._convert_metadata_to_target_format(source_metadata, target_service)
+                    print(f"MetaMan Embed & Save: Converted metadata to {target_service} format ({len(metadata_text)} chars)")
+                    
                 except Exception as e:
-                    print(f"MetaMan Embed & Save: Error parsing metadata JSON: {e}")
+                    print(f"MetaMan Embed & Save: Error parsing/converting metadata JSON: {e}")
                     metadata_text = metadata_json  # Fallback to raw input
             else:
                 metadata_text = "MetaMan processed image"
@@ -568,11 +570,17 @@ class MetaManEmbedAndSave:
             else:
                 pil_image = image
             
-            # Save to ComfyUI output directory with metadata
+            # Create subdirectory and save with metadata
             output_dir = folder_paths.get_output_directory()
+            target_dir = os.path.join(output_dir, directory)
+            
+            # Create subdirectory if it doesn't exist
+            os.makedirs(target_dir, exist_ok=True)
+            print(f"MetaMan Embed & Save: Created/confirmed directory: {target_dir}")
+            
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{filename_prefix}_{timestamp}.png"
-            filepath = os.path.join(output_dir, filename)
+            filename = f"MetaMan_{target_service}_{timestamp}.png"
+            filepath = os.path.join(target_dir, filename)
             
             # Create PNG info with metadata
             png_info = PngInfo()
@@ -586,11 +594,154 @@ class MetaManEmbedAndSave:
             print(f"MetaMan Embed & Save: Successfully saved image with metadata to {filepath}")
             print(f"MetaMan Embed & Save: File size: {os.path.getsize(filepath)} bytes")
             
-            return {"ui": {"images": [{"filename": filename, "subfolder": "", "type": "output"}]}}
+            return {"ui": {"images": [{"filename": filename, "subfolder": directory, "type": "output"}]}}
             
         except Exception as e:
             print(f"MetaMan Embed & Save Error: {e}")
             return {"ui": {"text": [f"Error: {str(e)}"]}}
+    
+    def _convert_metadata_to_target_format(self, metadata: dict, target_service: str) -> str:
+        """
+        Convert metadata to the specified target service format
+        """
+        try:
+            if target_service == "automatic1111":
+                return self._format_a1111_output(metadata)
+            elif target_service == "comfyui":
+                return self._format_comfyui_output(metadata)
+            elif target_service == "civitai":
+                return self._format_civitai_output(metadata)
+            elif target_service == "forge":
+                return self._format_forge_output(metadata)
+            elif target_service == "tensor.ai":
+                return self._format_tensor_ai_output(metadata)
+            elif target_service == "leonardo.ai":
+                return self._format_leonardo_ai_output(metadata)
+            else:
+                # Generic JSON format for unknown services
+                return json.dumps(metadata, indent=2)
+        except Exception as e:
+            print(f"MetaMan Embed & Save: Error converting to {target_service}: {e}")
+            return json.dumps(metadata, indent=2)  # Fallback to JSON
+    
+    def _format_a1111_output(self, metadata: dict) -> str:
+        """Format metadata for A1111 compatibility"""
+        lines = []
+        
+        # Positive prompt
+        if 'prompt' in metadata:
+            lines.append(metadata['prompt'])
+        
+        # Negative prompt
+        if 'negative_prompt' in metadata:
+            lines.append(f"Negative prompt: {metadata['negative_prompt']}")
+        
+        # Parameters line
+        params = []
+        param_order = ["steps", "sampler", "cfg_scale", "seed", "width", "height", "model_name", "scheduler"]
+        
+        for param in param_order:
+            if param in metadata and metadata[param] is not None:
+                if param == "cfg_scale":
+                    params.append(f"CFG scale: {metadata[param]}")
+                elif param == "model_name":
+                    params.append(f"Model: {metadata[param]}")
+                elif param == "width" and "height" in metadata:
+                    params.append(f"Size: {metadata['width']}x{metadata['height']}")
+                elif param != "height":  # Skip height since it's handled with width
+                    params.append(f"{param.title()}: {metadata[param]}")
+        
+        if params:
+            lines.append(", ".join(params))
+        
+        return "\n".join(lines)
+    
+    def _format_comfyui_output(self, metadata: dict) -> str:
+        """Format metadata for ComfyUI compatibility"""
+        # For ComfyUI, return structured JSON with workflow info
+        comfyui_meta = {
+            "prompt": metadata.get('prompt', ''),
+            "negative_prompt": metadata.get('negative_prompt', ''),
+            "steps": metadata.get('steps', 20),
+            "cfg_scale": metadata.get('cfg_scale', 7.0),
+            "sampler": metadata.get('sampler', 'euler'),
+            "scheduler": metadata.get('scheduler', 'normal'),
+            "seed": metadata.get('seed', -1),
+            "width": metadata.get('width', 512),
+            "height": metadata.get('height', 512),
+            "model_name": metadata.get('model_name', ''),
+            "loras": metadata.get('loras', []),
+            "embeddings": metadata.get('embeddings', []),
+            "metaman_converted": True,
+            "conversion_time": datetime.now().isoformat()
+        }
+        return json.dumps(comfyui_meta, indent=2)
+    
+    def _format_civitai_output(self, metadata: dict) -> str:
+        """Format metadata for Civitai compatibility (enhanced A1111)"""
+        a1111_output = self._format_a1111_output(metadata)
+        
+        # Add Civitai-specific information
+        civitai_additions = []
+        
+        # Add model hash if available
+        if 'model_hash' in metadata:
+            civitai_additions.append(f"Model hash: {metadata['model_hash']}")
+        
+        # Add LoRA information
+        if 'loras' in metadata and metadata['loras']:
+            lora_strings = []
+            for lora in metadata['loras']:
+                if isinstance(lora, dict):
+                    lora_name = lora.get('real_name', lora.get('name', ''))
+                    lora_weight = lora.get('weight', 1.0)
+                    lora_strings.append(f"<lora:{lora_name}:{lora_weight}>")
+            if lora_strings:
+                civitai_additions.append(f"Lora hashes: {', '.join(lora_strings)}")
+        
+        if civitai_additions:
+            return a1111_output + "\n" + ", ".join(civitai_additions)
+        else:
+            return a1111_output
+    
+    def _format_forge_output(self, metadata: dict) -> str:
+        """Format metadata for Forge compatibility (A1111-based)"""
+        return self._format_a1111_output(metadata)  # Forge uses A1111 format
+    
+    def _format_tensor_ai_output(self, metadata: dict) -> str:
+        """Format metadata for Tensor.AI compatibility"""
+        tensor_meta = {
+            "prompt": metadata.get('prompt', ''),
+            "negativePrompt": metadata.get('negative_prompt', ''),
+            "steps": metadata.get('steps', 20),
+            "guidanceScale": metadata.get('cfg_scale', 7.0),
+            "sampler": metadata.get('sampler', 'euler'),
+            "seed": metadata.get('seed', -1),
+            "width": metadata.get('width', 512),
+            "height": metadata.get('height', 512),
+            "model": metadata.get('model_name', ''),
+            "style": metadata.get('tensor_ai_style', 'Default'),
+            "metaman_converted": True
+        }
+        return json.dumps(tensor_meta, indent=2)
+    
+    def _format_leonardo_ai_output(self, metadata: dict) -> str:
+        """Format metadata for Leonardo.AI compatibility"""
+        leonardo_meta = {
+            "prompt": metadata.get('prompt', ''),
+            "negative_prompt": metadata.get('negative_prompt', ''),
+            "num_images": 1,
+            "width": metadata.get('width', 512),
+            "height": metadata.get('height', 512),
+            "num_inference_steps": metadata.get('steps', 20),
+            "guidance_scale": metadata.get('cfg_scale', 7.0),
+            "modelId": metadata.get('model_name', ''),
+            "preset_style": metadata.get('leonardo_preset', 'GENERAL'),
+            "scheduler": metadata.get('sampler', 'EULER_DISCRETE'),
+            "seed": metadata.get('seed', -1),
+            "metaman_converted": True
+        }
+        return json.dumps(leonardo_meta, indent=2)
     
     def _format_metadata_for_embedding(self, metadata: dict) -> str:
         """Convert metadata dict to A1111 format for embedding"""
