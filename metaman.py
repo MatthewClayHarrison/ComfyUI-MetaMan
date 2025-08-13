@@ -846,7 +846,12 @@ class MetaManLoadImage:
             all_text_content = self._scan_all_text_content_universal(prompt_data)
             print(f"MetaMan Universal: Found {len(all_text_content)} text candidates from prompt data")
             
-            # Phase 2.5: CRITICAL - Also scan workflow data for widget_values (where embeddings are stored)
+            # Phase 2.5: CRITICAL - Direct workflow scanning for embeddings (simplified approach)
+            workflow_embeddings = self._extract_embeddings_from_workflow_direct()
+            if workflow_embeddings:
+                print(f"MetaMan Universal: Found {len(workflow_embeddings)} embeddings directly from workflow data")
+            
+            # Phase 2.6: Also try the old workflow scanning method as backup
             workflow_text_content = self._scan_workflow_widget_values()
             if workflow_text_content:
                 all_text_content.extend(workflow_text_content)
@@ -894,9 +899,18 @@ class MetaManLoadImage:
                 params['loras'] = all_loras
                 print(f"MetaMan Universal: Extracted {len(all_loras)} LoRAs: {[lora['name'] for lora in all_loras]}")
             
+            # Combine universal embeddings with direct workflow embeddings
+            if workflow_embeddings:
+                # Add workflow embeddings to the universal list, avoiding duplicates
+                for workflow_emb in workflow_embeddings:
+                    emb_name = workflow_emb['name'].lower()
+                    if not any(emb['name'].lower() == emb_name for emb in all_embeddings):
+                        all_embeddings.append(workflow_emb)
+                        print(f"MetaMan Universal: Added workflow embedding: {workflow_emb['name']}")
+            
             if all_embeddings:
                 params['embeddings'] = all_embeddings
-                print(f"MetaMan Universal: Extracted {len(all_embeddings)} embeddings: {[emb['name'] for emb in all_embeddings]}")
+                print(f"MetaMan Universal: Final extracted {len(all_embeddings)} embeddings: {[emb['name'] for emb in all_embeddings]}")
             
             print(f"MetaMan Universal: Extraction complete: {list(params.keys())}")
             
@@ -904,6 +918,8 @@ class MetaManLoadImage:
             print(f"MetaMan Universal Extraction Error: {e}")
             import traceback
             traceback.print_exc()
+            # Initialize workflow_embeddings as empty list if there was an error
+            workflow_embeddings = []
         
         return params
     
@@ -995,6 +1011,70 @@ class MetaManLoadImage:
                     print(f"MetaMan Universal: Found text in {node_id}.{field_name} ({class_type}): {len(field_value)} chars")
         
         return text_candidates
+    
+    def _extract_embeddings_from_workflow_direct(self) -> list:
+        """Direct extraction of embeddings from workflow data - simplified approach"""
+        embeddings = []
+        
+        try:
+            # Direct access to workflow data from current metadata
+            if not hasattr(self, '_current_metadata'):
+                print(f"MetaMan Direct: No current metadata available")
+                return embeddings
+            
+            # Get workflow data directly
+            workflow_data = None
+            if 'comfyui_workflow' in self._current_metadata:
+                workflow_data = self._current_metadata['comfyui_workflow']
+                print(f"MetaMan Direct: Found workflow data in comfyui_workflow")
+            elif 'png_chunk_workflow' in self._current_metadata:
+                try:
+                    workflow_data = json.loads(self._current_metadata['png_chunk_workflow'])
+                    print(f"MetaMan Direct: Parsed workflow data from png_chunk_workflow")
+                except:
+                    print(f"MetaMan Direct: Failed to parse png_chunk_workflow")
+            
+            if not workflow_data or not isinstance(workflow_data, dict):
+                print(f"MetaMan Direct: No valid workflow data found")
+                return embeddings
+            
+            nodes = workflow_data.get('nodes', [])
+            if not nodes:
+                print(f"MetaMan Direct: No nodes in workflow data")
+                return embeddings
+            
+            print(f"MetaMan Direct: Scanning {len(nodes)} nodes for embeddings")
+            
+            # Scan each node's widgets_values for embeddings
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                    
+                node_id = node.get('id', 'unknown')
+                node_type = node.get('type', 'unknown')
+                widgets_values = node.get('widgets_values', [])
+                
+                if isinstance(widgets_values, list) and widgets_values:
+                    for i, widget_value in enumerate(widgets_values):
+                        if isinstance(widget_value, str) and 'embedding:' in widget_value:
+                            print(f"MetaMan Direct: Found embedding text in node {node_id}.widget_{i}: {widget_value[:50]}...")
+                            
+                            # Extract embeddings from this widget value
+                            widget_embeddings = self._extract_embeddings_from_text(widget_value)
+                            for emb in widget_embeddings:
+                                # Avoid duplicates
+                                if not any(existing['name'].lower() == emb['name'].lower() for existing in embeddings):
+                                    embeddings.append(emb)
+                                    print(f"MetaMan Direct: Added embedding '{emb['name']}' from node {node_id}")
+            
+            print(f"MetaMan Direct: Final embeddings found: {len(embeddings)}")
+            return embeddings
+            
+        except Exception as e:
+            print(f"MetaMan Direct Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return embeddings
     
     def _scan_workflow_widget_values(self) -> list:
         """Enhanced workflow data scanning for widgets_values - critical for Power Prompt embeddings!"""
