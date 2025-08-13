@@ -143,47 +143,99 @@ class MetaManLoadAndConvert:
         return metadata
     
     def _parse_parameter_line(self, line: str) -> dict:
-        """Parse A1111 parameter line"""
+        """Parse A1111 parameter line with improved handling of complex prompts"""
         params = {}
         
-        # Split by comma, but be careful of commas in quoted values
+        # Enhanced splitting that handles quotes, parentheses, and brackets
         parts = []
         current = ""
         in_quotes = False
+        paren_depth = 0
+        bracket_depth = 0
         
         for char in line:
             if char == '"' and (not current or current[-1] != '\\'):
                 in_quotes = not in_quotes
-            elif char == ',' and not in_quotes:
-                parts.append(current.strip())
+            elif char == '(' and not in_quotes:
+                paren_depth += 1
+            elif char == ')' and not in_quotes:
+                paren_depth -= 1
+            elif char == '[' and not in_quotes:
+                bracket_depth += 1
+            elif char == ']' and not in_quotes:
+                bracket_depth -= 1
+            elif char == ',' and not in_quotes and paren_depth == 0 and bracket_depth == 0:
+                # Only split on commas that are not inside quotes, parentheses, or brackets
+                part = current.strip()
+                if part:  # Only add non-empty parts
+                    parts.append(part)
                 current = ""
                 continue
             current += char
         
+        # Don't forget the last part
         if current.strip():
             parts.append(current.strip())
         
+        print(f"MetaMan Debug: Parsed {len(parts)} parameter parts from line")
+        
         # Parse each parameter
         for part in parts:
-            if ':' in part:
-                key, value = part.split(':', 1)
-                key = key.strip().lower().replace(' ', '_')
-                value = value.strip()
+            part = part.strip()
+            if not part:
+                continue
                 
-                # Convert known numeric values
-                if key in ['steps', 'width', 'height', 'seed', 'clip_skip']:
-                    try:
-                        params[key] = int(value)
-                    except:
-                        params[key] = value
-                elif key in ['cfg_scale', 'denoising_strength', 'eta']:
-                    try:
-                        params[key] = float(value)
-                    except:
+            if ':' in part:
+                # Find the first colon that's not inside parentheses or brackets
+                colon_pos = -1
+                paren_depth = 0
+                bracket_depth = 0
+                in_quotes = False
+                
+                for i, char in enumerate(part):
+                    if char == '"' and (i == 0 or part[i-1] != '\\'):
+                        in_quotes = not in_quotes
+                    elif char == '(' and not in_quotes:
+                        paren_depth += 1
+                    elif char == ')' and not in_quotes:
+                        paren_depth -= 1
+                    elif char == '[' and not in_quotes:
+                        bracket_depth += 1
+                    elif char == ']' and not in_quotes:
+                        bracket_depth -= 1
+                    elif char == ':' and not in_quotes and paren_depth == 0 and bracket_depth == 0:
+                        colon_pos = i
+                        break
+                
+                if colon_pos > 0:
+                    key = part[:colon_pos].strip().lower().replace(' ', '_')
+                    value = part[colon_pos + 1:].strip()
+                    
+                    # Remove quotes if present
+                    if value.startswith('"') and value.endswith('"'):
+                        value = value[1:-1]
+                    
+                    print(f"MetaMan Debug: Parsed parameter '{key}': '{value}' (length: {len(value)})")
+                    
+                    # Convert known numeric values
+                    if key in ['steps', 'width', 'height', 'seed', 'clip_skip']:
+                        try:
+                            params[key] = int(value)
+                        except ValueError:
+                            params[key] = value
+                    elif key in ['cfg_scale', 'denoising_strength', 'eta']:
+                        try:
+                            params[key] = float(value)
+                        except ValueError:
+                            params[key] = value
+                    else:
                         params[key] = value
                 else:
-                    params[key] = value
+                    print(f"MetaMan Debug: Skipping malformed parameter part: '{part}'")
+            else:
+                print(f"MetaMan Debug: Skipping non-parameter part: '{part}'")
         
+        print(f"MetaMan Debug: Final parsed parameters: {list(params.keys())}")
         return params
     
     def _extract_params_from_comfyui_prompt(self, prompt_data: dict) -> dict:
@@ -906,17 +958,23 @@ class MetaManLoadImage:
         return classified
     
     def _score_as_positive_prompt(self, candidate: dict) -> float:
-        """Score text as likely positive prompt"""
+        """Score text as likely positive prompt with enhanced detection for processed fields"""
         score = 0.0
         text = candidate['text']
         text_lower = text.lower()
         field_name = candidate['field_name'].lower()
+        node_type = candidate['node_type']
         
-        # Field name indicators (strong signals)
+        # ENHANCED: Field name indicators (strong signals)
         if 'positive' in field_name or 'prompt' in field_name:
             score += 3.0
-        if 'populated' in field_name or 'formatted' in field_name:
-            score += 2.0  # Processed text usually main prompt
+        # PRIORITY: Processed/populated fields are very likely to be the main prompt
+        if 'populated' in field_name or 'formatted' in field_name or 'processed' in field_name:
+            score += 4.0  # Increased from 2.0 - these are usually the complete prompt
+            print(f"MetaMan Universal: HIGH PRIORITY processed field detected: {candidate['source']}")
+        # Custom node field detection
+        if 'wildcard' in field_name or 'impact' in node_type.lower():
+            score += 3.0  # ImpactWildcardEncode is a common complete prompt source
         if 'text' in field_name:
             score += 1.0
         
@@ -933,16 +991,23 @@ class MetaManLoadImage:
         # LoRA presence (strong indicator of main prompt)
         if '<lora:' in text:
             lora_count = text.count('<lora:')
-            score += lora_count * 1.0
-            print(f"MetaMan Universal: Found {lora_count} LoRAs in {candidate['source']} (+{lora_count} score)")
+            score += lora_count * 2.0  # Increased weight - LoRAs are almost always in positive prompts
+            print(f"MetaMan Universal: Found {lora_count} LoRAs in {candidate['source']} (+{lora_count * 2.0} score)")
         
-        # Length scoring (longer text often positive)
-        if len(text) > 200:
+        # ENHANCED: Length scoring with better thresholds
+        text_length = len(text)
+        if text_length > 500:
+            score += 3.0  # Very long text likely main prompt
+        elif text_length > 200:
             score += 2.0
-        elif len(text) > 100:
+        elif text_length > 100:
             score += 1.0
-        elif len(text) > 50:
+        elif text_length > 50:
             score += 0.5
+        
+        # BREAK indicators (common in ComfyUI prompts)
+        if 'BREAK' in text.upper():
+            score += 1.0  # BREAK is common in detailed positive prompts
         
         # Negative indicators (reduce score)
         negative_keywords = ['worst', 'low quality', 'bad', 'ugly', 'blurry', 'deformed']
@@ -999,6 +1064,27 @@ class MetaManLoadImage:
             score -= 2.0  # LoRAs typically in positive prompts
         
         return max(0.0, score)
+    
+    def _extract_loras_from_text(self, text: str) -> list:
+        """Extract LoRA information from text using regex"""
+        import re
+        
+        loras = []
+        
+        # Pattern for <lora:name:weight> or <lora:name>
+        lora_pattern = r'<lora:([^>:]+)(?::([0-9.]+))?[^>]*>'
+        matches = re.findall(lora_pattern, text, re.IGNORECASE)
+        
+        for match in matches:
+            name = match[0].strip()
+            weight = float(match[1]) if match[1] else 1.0
+            
+            loras.append({
+                'name': name,
+                'weight': weight
+            })
+        
+        return loras
     
     def _extract_loras_universal(self, text_candidates: list) -> list:
         """Extract LoRAs from all text content"""
