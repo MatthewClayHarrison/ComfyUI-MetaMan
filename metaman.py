@@ -1295,7 +1295,10 @@ class MetaManLoadImage:
         all_embeddings = []
         seen_embeddings = set()
         
+        print(f"MetaMan Embeddings Debug: Scanning {len(text_candidates)} text candidates for embeddings")  # Debug log
+        
         for candidate in text_candidates:
+            print(f"MetaMan Embeddings Debug: Checking candidate {candidate['source']}: '{candidate['text'][:50]}...'")  # Debug log
             embeddings_in_text = self._extract_embeddings_from_text(candidate['text'])
             for embedding in embeddings_in_text:
                 embedding_key = embedding['name'].lower()
@@ -1303,6 +1306,8 @@ class MetaManLoadImage:
                     seen_embeddings.add(embedding_key)
                     all_embeddings.append(embedding)
                     print(f"MetaMan Universal: Found embedding '{embedding['name']}' in {candidate['source']}")
+        
+        print(f"MetaMan Embeddings Debug: Final universal embeddings: {all_embeddings}")  # Debug log
         
         return all_embeddings
     
@@ -1313,9 +1318,13 @@ class MetaManLoadImage:
         embeddings = []
         text_lower = text.lower()
         
+        print(f"MetaMan Embeddings Debug: Scanning text: '{text[:100]}...'")  # Debug log
+        
         # Pattern 1: embedding:name syntax
         embedding_pattern = r'embedding:([\w\-_\.]+)'
         matches = re.findall(embedding_pattern, text, re.IGNORECASE)
+        
+        print(f"MetaMan Embeddings Debug: Found {len(matches)} embedding: matches: {matches}")  # Debug log
         
         for match in matches:
             name = match.strip()
@@ -1323,6 +1332,7 @@ class MetaManLoadImage:
                 'name': name,
                 'type': 'embedding'
             })
+            print(f"MetaMan Embeddings Debug: Added embedding '{name}'")  # Debug log
         
         # Pattern 2: Well-known negative embedding names (even without embedding: prefix)
         negative_embeddings = [
@@ -1346,6 +1356,9 @@ class MetaManLoadImage:
                     'name': embedding_name,
                     'type': 'negative_embedding'
                 })
+                print(f"MetaMan Embeddings Debug: Added known negative embedding '{embedding_name}'")  # Debug log
+        
+        print(f"MetaMan Embeddings Debug: Final embeddings list: {embeddings}")  # Debug log
         
         return embeddings
     
