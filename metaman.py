@@ -109,6 +109,9 @@ class MetaManLoadAndConvert:
                             
                             # If this is prompt data, extract parameters immediately
                             if key == 'prompt':
+                                # Store current metadata for workflow scanning
+                                self._current_metadata = metadata
+                                
                                 extracted_params = self._extract_params_from_comfyui_prompt(json_data)
                                 metadata.update(extracted_params)
                                 
@@ -721,6 +724,9 @@ class MetaManLoadImage:
                             
                             # If this is prompt data, extract parameters immediately
                             if key == 'prompt':
+                                # Store current metadata for workflow scanning
+                                self._current_metadata = metadata
+                                
                                 extracted_params = self._extract_params_from_comfyui_prompt(json_data)
                                 metadata.update(extracted_params)
                                 
@@ -836,9 +842,15 @@ class MetaManLoadImage:
             # Phase 1: Extract core parameters universally
             self._extract_core_parameters_universal(prompt_data, params)
             
-            # Phase 2: Collect ALL text content from all nodes
+            # Phase 2: Collect ALL text content from all nodes (from prompt data)
             all_text_content = self._scan_all_text_content_universal(prompt_data)
-            print(f"MetaMan Universal: Found {len(all_text_content)} text candidates")
+            print(f"MetaMan Universal: Found {len(all_text_content)} text candidates from prompt data")
+            
+            # Phase 2.5: CRITICAL - Also scan workflow data for widget_values (where embeddings are stored)
+            workflow_text_content = self._scan_workflow_widget_values()
+            if workflow_text_content:
+                all_text_content.extend(workflow_text_content)
+                print(f"MetaMan Universal: Added {len(workflow_text_content)} text candidates from workflow data")
             
             # Phase 3: Classify text content using improved heuristics
             classified_prompts = self._classify_prompts_intelligent(all_text_content)
@@ -1006,6 +1018,85 @@ class MetaManLoadImage:
                         print(f"MetaMan Widget Debug: Skipping widget_{i} - not string or too short")
             else:
                 print(f"MetaMan Widget Debug: Node {node_id} has no widget_values or empty list")
+        
+        return text_candidates
+    
+    def _scan_workflow_widget_values(self) -> list:
+        """Scan workflow data for widgets_values - this is where Power Prompt embeddings are stored!"""
+        text_candidates = []
+        
+        try:
+            # Get workflow data from the instance - we need to store it during metadata extraction
+            if not hasattr(self, '_current_metadata'):
+                print(f"MetaMan Workflow Debug: No current metadata available for workflow scanning")
+                return text_candidates
+            
+            # Look for workflow data in current metadata
+            workflow_data = None
+            for key in ['comfyui_workflow', 'png_chunk_workflow', 'info_workflow']:
+                if key in self._current_metadata:
+                    if isinstance(self._current_metadata[key], dict):
+                        workflow_data = self._current_metadata[key]
+                        print(f"MetaMan Workflow Debug: Found workflow data in {key}")
+                        break
+                    elif isinstance(self._current_metadata[key], str):
+                        try:
+                            workflow_data = json.loads(self._current_metadata[key])
+                            print(f"MetaMan Workflow Debug: Parsed workflow data from {key}")
+                            break
+                        except:
+                            pass
+            
+            if not workflow_data:
+                print(f"MetaMan Workflow Debug: No workflow data found")
+                return text_candidates
+            
+            # Extract nodes from workflow data
+            nodes = workflow_data.get('nodes', [])
+            if not nodes:
+                print(f"MetaMan Workflow Debug: No nodes found in workflow data")
+                return text_candidates
+            
+            print(f"MetaMan Workflow Debug: Scanning {len(nodes)} workflow nodes for widgets_values")
+            
+            # Scan each node for widgets_values
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                    
+                node_id = str(node.get('id', 'unknown'))
+                node_type = node.get('type', 'unknown')
+                widgets_values = node.get('widgets_values', [])
+                
+                print(f"MetaMan Workflow Debug: Node {node_id} ({node_type}) widgets_values: {widgets_values}")
+                
+                if isinstance(widgets_values, list) and len(widgets_values) > 0:
+                    for i, widget_value in enumerate(widgets_values):
+                        print(f"MetaMan Workflow Debug: Checking widget_{i}: type={type(widget_value)}, value='{str(widget_value)[:50]}...'")
+                        if isinstance(widget_value, str) and len(widget_value.strip()) > 5:
+                            text_candidates.append({
+                                'text': widget_value,
+                                'source': f"workflow.{node_id}.widget_{i}",
+                                'node_id': node_id,
+                                'field_name': f"widget_{i}",
+                                'node_type': node_type,
+                                'length': len(widget_value),
+                                'is_text_field': True,
+                                'is_processed_field': False
+                            })
+                            
+                            print(f"MetaMan Workflow: Found text in workflow.{node_id}.widget_{i} ({node_type}): {len(widget_value)} chars")
+                        else:
+                            print(f"MetaMan Workflow Debug: Skipping widget_{i} - not string or too short")
+                else:
+                    print(f"MetaMan Workflow Debug: Node {node_id} has no widgets_values or empty list")
+            
+            print(f"MetaMan Workflow Debug: Found {len(text_candidates)} text candidates from workflow data")
+            
+        except Exception as e:
+            print(f"MetaMan Workflow Debug Error: {e}")
+            import traceback
+            traceback.print_exc()
         
         return text_candidates
     
