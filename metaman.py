@@ -799,7 +799,19 @@ class MetaManLoadImage:
             all_embeddings = self._extract_embeddings_universal(all_text_content)
             print(f"MetaMan Universal: DEBUG - Embeddings extraction returned: {all_embeddings}")
             
-            # Phase 6: Compile final results
+            # Phase 6: Resolve model names by tracing connections
+            model_info = self._resolve_model_names(prompt_data)
+            if model_info:
+                params.update(model_info)
+                print(f"MetaMan Universal: Resolved models: {model_info}")
+                
+            # Phase 6.5: Determine model type from VAE (helps identify SD1.5 vs SDXL vs Flux)
+            model_type = self._determine_model_type(prompt_data)
+            if model_type:
+                params['model_type'] = model_type
+                print(f"MetaMan Universal: Detected model type: {model_type}")
+            
+            # Phase 7: Compile final results
             if classified_prompts['positive']:
                 params['prompt'] = classified_prompts['positive']['text']
                 print(f"MetaMan Universal: POSITIVE from {classified_prompts['positive']['source']}: {params['prompt'][:100]}...")
@@ -848,7 +860,6 @@ class MetaManLoadImage:
             'scheduler': ['scheduler', 'scheduler_name', 'noise_schedule', 'scheduler_type'],
             'seed': ['seed', 'noise_seed', 'random_seed', 'generator_seed'],
             'denoising_strength': ['denoise', 'denoising_strength', 'strength', 'denoise_strength'],
-            'model_name': ['ckpt_name', 'model_name', 'checkpoint_name', 'model', 'checkpoint'],
             'width': ['width', 'image_width', 'w', 'img_width'],
             'height': ['height', 'image_height', 'h', 'img_height']
         }
@@ -860,6 +871,9 @@ class MetaManLoadImage:
                         params[param_key] = inputs[field]
                         print(f"MetaMan Universal: Found {param_key} = {inputs[field]} in {node_id} ({class_type})")
                         break
+        
+        # Special handling for model_name - don't extract node references here
+        # Model resolution will be handled separately in _resolve_model_names()
     
 
     def _extract_loras_from_text(self, text: str) -> list:
@@ -1258,6 +1272,163 @@ class MetaManLoadImage:
                 })
         
         return embeddings
+    
+    def _resolve_model_names(self, prompt_data: dict) -> dict:
+        """Resolve actual model names by tracing node connections from samplers"""
+        model_info = {}
+        
+        try:
+            # Find all sampler nodes (they determine which models are actually used)
+            sampler_nodes = []
+            for node_id, node_data in prompt_data.items():
+                if not isinstance(node_data, dict):
+                    continue
+                class_type = node_data.get('class_type', '')
+                if 'sampler' in class_type.lower() or class_type == 'KSampler':
+                    sampler_nodes.append((node_id, node_data))
+                    print(f"MetaMan Universal: Found sampler node {node_id} ({class_type})")
+            
+            if not sampler_nodes:
+                print(f"MetaMan Universal: No sampler nodes found")
+                return model_info
+            
+            # For each sampler, trace the model connection
+            used_models = []
+            for node_id, node_data in sampler_nodes:
+                inputs = node_data.get('inputs', {})
+                
+                # Look for model input (usually a node reference)
+                model_input = inputs.get('model')
+                if model_input and isinstance(model_input, list) and len(model_input) >= 2:
+                    source_node_id = str(model_input[0])
+                    print(f"MetaMan Universal: Sampler {node_id} uses model from node {source_node_id}")
+                    
+                    # Find the source node and extract the model name
+                    model_name = self._trace_model_source(prompt_data, source_node_id)
+                    if model_name:
+                        used_models.append(model_name)
+                        print(f"MetaMan Universal: Traced to model: {model_name}")
+            
+            # Remove duplicates and set model info
+            unique_models = list(set(used_models))
+            if unique_models:
+                if len(unique_models) == 1:
+                    model_info['model_name'] = unique_models[0]
+                else:
+                    model_info['model_name'] = unique_models[0]  # Primary model
+                    model_info['additional_models'] = unique_models[1:]  # Additional models
+                
+                print(f"MetaMan Universal: Final model resolution: {unique_models}")
+            
+        except Exception as e:
+            print(f"MetaMan Universal: Error resolving model names: {e}")
+        
+        return model_info
+    
+    def _trace_model_source(self, prompt_data: dict, node_id: str) -> str:
+        """Trace a node to find the actual model name"""
+        try:
+            if node_id not in prompt_data:
+                return None
+            
+            node_data = prompt_data[node_id]
+            if not isinstance(node_data, dict):
+                return None
+            
+            class_type = node_data.get('class_type', '')
+            inputs = node_data.get('inputs', {})
+            
+            print(f"MetaMan Universal: Tracing model source in node {node_id} ({class_type})")
+            
+            # Check different model loader types
+            model_fields = [
+                'ckpt_name', 'model_name', 'checkpoint_name', 
+                'unet_name', 'model', 'checkpoint'
+            ]
+            
+            for field in model_fields:
+                if field in inputs and inputs[field]:
+                    model_name = inputs[field]
+                    print(f"MetaMan Universal: Found model '{model_name}' in {node_id}.{field}")
+                    return model_name
+            
+            # If this node doesn't have a direct model name, trace further
+            # Look for model input that might be a reference to another node
+            model_input = inputs.get('model')
+            if model_input and isinstance(model_input, list) and len(model_input) >= 2:
+                source_node_id = str(model_input[0])
+                print(f"MetaMan Universal: Node {node_id} model input references node {source_node_id}")
+                return self._trace_model_source(prompt_data, source_node_id)
+            
+            return None
+            
+        except Exception as e:
+            print(f"MetaMan Universal: Error tracing model source for node {node_id}: {e}")
+            return None
+    
+    def _determine_model_type(self, prompt_data: dict) -> str:
+        """Determine model type (SD1.5, SDXL, Flux, etc.) by analyzing VAE and other indicators"""
+        try:
+            # Look for VAE nodes and their model names
+            for node_id, node_data in prompt_data.items():
+                if not isinstance(node_data, dict):
+                    continue
+                    
+                class_type = node_data.get('class_type', '')
+                inputs = node_data.get('inputs', {})
+                
+                # Check VAE loaders
+                if 'vae' in class_type.lower():
+                    vae_name = inputs.get('vae_name', '')
+                    if vae_name:
+                        vae_lower = vae_name.lower()
+                        if 'ae.safetensors' in vae_lower or 'flux' in vae_lower:
+                            return 'Flux'
+                        elif 'sdxl' in vae_lower or 'xl' in vae_lower:
+                            return 'SDXL'
+                        elif any(sd15_indicator in vae_lower for sd15_indicator in ['sd15', 'v1-5', 'vae-ft']):
+                            return 'SD1.5'
+                
+                # Check for SD3/Flux specific nodes
+                if class_type in ['EmptySD3LatentImage', 'SD3LatentImage']:
+                    return 'SD3/Flux'
+                    
+                # Check DualCLIPLoader (Flux indicator)
+                if class_type == 'DualCLIPLoader':
+                    clip_name1 = inputs.get('clip_name1', '')
+                    clip_name2 = inputs.get('clip_name2', '')
+                    if 't5xxl' in clip_name2.lower():
+                        return 'Flux'
+                
+                # Check for UNet loaders (often Flux GGUF)
+                if 'unet' in class_type.lower():
+                    unet_name = inputs.get('unet_name', '')
+                    if 'flux' in unet_name.lower():
+                        return 'Flux'
+            
+            # Fallback: look at latent image dimensions
+            for node_id, node_data in prompt_data.items():
+                if not isinstance(node_data, dict):
+                    continue
+                    
+                class_type = node_data.get('class_type', '')
+                inputs = node_data.get('inputs', {})
+                
+                if 'latent' in class_type.lower() and 'empty' in class_type.lower():
+                    width = inputs.get('width', 0)
+                    height = inputs.get('height', 0)
+                    
+                    # Flux typically uses 1024x1024 or similar
+                    if width >= 1024 or height >= 1024:
+                        return 'Flux/SDXL'  # Could be either
+                    elif width <= 512 and height <= 512:
+                        return 'SD1.5'
+            
+            return 'Unknown'
+            
+        except Exception as e:
+            print(f"MetaMan Universal: Error determining model type: {e}")
+            return 'Unknown'
 
 
 class MetaManUniversalNodeV2:
