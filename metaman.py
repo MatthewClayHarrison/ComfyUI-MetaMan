@@ -1475,23 +1475,30 @@ class MetaManLoadImage:
             # Look for Tensor.AI generation_data chunk
             generation_data_raw = metadata.get('png_chunk_generation_data') or metadata.get('info_generation_data')
             if not generation_data_raw:
+                print(f"MetaMan De-obfuscation: No generation_data found")
                 return deobfuscated
+            
+            print(f"MetaMan De-obfuscation: Found generation_data ({len(generation_data_raw)} chars)")
+            
+            # Clean the JSON string - remove null bytes and strip whitespace
+            cleaned_data = generation_data_raw.replace('\u0000', '').replace('\x00', '').strip()
+            print(f"MetaMan De-obfuscation: Cleaned data ({len(cleaned_data)} chars)")
             
             # Parse the generation data JSON
             import json
-            generation_data = json.loads(generation_data_raw)
+            generation_data = json.loads(cleaned_data)
             
             # Extract model mappings from generation_data
             models_data = generation_data.get('models', [])
             base_model_data = generation_data.get('baseModel', {})
             
-            print(f"MetaMan De-obfuscation: Found {len(models_data)} models in generation_data")
+            print(f"MetaMan De-obfuscation: Found {len(models_data)} LoRAs and base model in generation_data")
             
             # Create EMS to real name mapping
             ems_mapping = {}
             
             # Map LoRAs
-            for model_data in models_data:
+            for i, model_data in enumerate(models_data):
                 if model_data.get('type') == 'LORA':
                     real_name = model_data.get('modelFileName', '')
                     model_hash = model_data.get('hash', '')
@@ -1503,10 +1510,11 @@ class MetaManLoadImage:
                         'hash': model_hash,
                         'weight': weight,
                         'label': label,
-                        'type': 'lora'
+                        'type': 'lora',
+                        'index': i
                     }
                     
-                    print(f"MetaMan De-obfuscation: LoRA mapping found - {real_name} (hash: {model_hash[:16]}...)")
+                    print(f"MetaMan De-obfuscation: LoRA {i} mapping - {real_name} (hash: {model_hash[:16]}...)")
             
             # Map base model
             if base_model_data:
@@ -1514,61 +1522,52 @@ class MetaManLoadImage:
                 model_hash = base_model_data.get('hash', '')
                 label = base_model_data.get('label', '')
                 
-                ems_mapping[real_name] = {
-                    'hash': model_hash,
-                    'label': label,
-                    'type': 'checkpoint'
-                }
-                
-                print(f"MetaMan De-obfuscation: Checkpoint mapping found - {real_name} (hash: {model_hash[:16]}...)")
-            
-            # Apply de-obfuscation to current model names
-            if hasattr(self, '_current_model_name') or 'model_name' in deobfuscated:
-                current_model = getattr(self, '_current_model_name', None)
-                for real_name, mapping_data in ems_mapping.items():
-                    if mapping_data['type'] == 'checkpoint':
-                        deobfuscated['model_name_real'] = real_name
-                        deobfuscated['model_hash'] = mapping_data['hash']
-                        deobfuscated['model_label'] = mapping_data['label']
-                        break
+                if real_name:
+                    ems_mapping[real_name] = {
+                        'hash': model_hash,
+                        'label': label,
+                        'type': 'checkpoint'
+                    }
+                    
+                    # Set the real checkpoint name
+                    deobfuscated['model_name_real'] = real_name
+                    deobfuscated['model_hash'] = model_hash
+                    deobfuscated['model_label'] = label
+                    
+                    print(f"MetaMan De-obfuscation: Checkpoint mapping - {real_name} (hash: {model_hash[:16]}...)")
             
             # Apply de-obfuscation to LoRAs
-            if loras:
+            if loras and models_data:
                 deobfuscated_loras = []
-                lora_mapping_by_index = {}
                 
-                # Create a mapping by order (index) since EMS codes don't directly match filenames
-                for i, model_data in enumerate(models_data):
-                    if model_data.get('type') == 'LORA':
-                        lora_mapping_by_index[i] = {
-                            'real_name': model_data.get('modelFileName', ''),
-                            'hash': model_data.get('hash', ''),
-                            'weight': model_data.get('weight', 1.0),
-                            'label': model_data.get('label', '')
-                        }
-                
-                print(f"MetaMan De-obfuscation: Created mapping for {len(lora_mapping_by_index)} LoRAs by index")
+                print(f"MetaMan De-obfuscation: Mapping {len(loras)} LoRAs with {len(models_data)} model data entries")
                 
                 # Map LoRAs by order/index since EMS names don't match real names
                 for i, lora in enumerate(loras):
                     lora_name = lora.get('name', '') if isinstance(lora, dict) else str(lora)
                     lora_weight = lora.get('weight', 1.0) if isinstance(lora, dict) else 1.0
                     
-                    if i in lora_mapping_by_index:
-                        mapping_data = lora_mapping_by_index[i]
-                        enhanced_lora = {
-                            'name': lora_name,  # Keep original EMS name
-                            'real_name': mapping_data['real_name'],  # Add real name
-                            'weight': lora_weight,  # Use weight from extraction
-                            'hash': mapping_data['hash'],
-                            'label': mapping_data['label']
-                        }
-                        deobfuscated_loras.append(enhanced_lora)
-                        print(f"MetaMan De-obfuscation: Enhanced LoRA {i} - {lora_name} → {mapping_data['real_name']}")
+                    # Find corresponding model data by index
+                    if i < len(models_data):
+                        model_data = models_data[i]
+                        if model_data.get('type') == 'LORA':
+                            real_name = model_data.get('modelFileName', '')
+                            enhanced_lora = {
+                                'name': lora_name,  # Keep original EMS name
+                                'real_name': real_name,  # Add real name
+                                'weight': lora_weight,  # Use weight from extraction
+                                'hash': model_data.get('hash', ''),
+                                'label': model_data.get('label', '')
+                            }
+                            deobfuscated_loras.append(enhanced_lora)
+                            print(f"MetaMan De-obfuscation: Enhanced LoRA {i} - {lora_name} → {real_name}")
+                        else:
+                            deobfuscated_loras.append(lora)
+                            print(f"MetaMan De-obfuscation: Model data {i} not LoRA type, keeping original: {lora_name}")
                     else:
                         # Keep original if no mapping found
                         deobfuscated_loras.append(lora)
-                        print(f"MetaMan De-obfuscation: No mapping for LoRA {i}, keeping original: {lora_name}")
+                        print(f"MetaMan De-obfuscation: No model data for LoRA {i}, keeping original: {lora_name}")
                 
                 if deobfuscated_loras:
                     deobfuscated['loras_enhanced'] = deobfuscated_loras
@@ -1577,7 +1576,11 @@ class MetaManLoadImage:
             # Store the EMS mapping for future reference
             if ems_mapping:
                 deobfuscated['tensor_ai_mappings'] = ems_mapping
+                print(f"MetaMan De-obfuscation: Stored {len(ems_mapping)} mappings")
                 
+        except json.JSONDecodeError as e:
+            print(f"MetaMan De-obfuscation JSON Error: {e}")
+            print(f"MetaMan De-obfuscation: Problematic data around char {e.pos}: '{generation_data_raw[max(0, e.pos-50):e.pos+50]}'")
         except Exception as e:
             print(f"MetaMan De-obfuscation Error: {e}")
         
