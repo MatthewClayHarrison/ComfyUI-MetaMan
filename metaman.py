@@ -444,13 +444,36 @@ class MetaManExtractComponents:
             
             denoising_strength = float(metadata.get('denoising_strength', 1.0))
             
-            # Enhanced LoRAs - prefer de-obfuscated version if available
+            # Enhanced LoRAs - prefer de-obfuscated version if available (simplified output)
             loras_list = []
             if 'loras_enhanced' in metadata and isinstance(metadata['loras_enhanced'], list):
-                loras_list = metadata['loras_enhanced']  # Use enhanced LoRAs with real names
-                print(f"MetaMan Extract Components: Using enhanced LoRAs with real names")
+                # Simplify enhanced LoRAs to only include real_name and weight
+                raw_loras = metadata['loras_enhanced']
+                for lora in raw_loras:
+                    if isinstance(lora, dict):
+                        simplified_lora = {
+                            'real_name': lora.get('real_name', lora.get('name', '')),
+                            'weight': lora.get('weight', 1.0)
+                        }
+                        loras_list.append(simplified_lora)
+                    else:
+                        # Handle non-dict LoRAs (fallback)
+                        loras_list.append({'real_name': str(lora), 'weight': 1.0})
+                print(f"MetaMan Extract Components: Using simplified enhanced LoRAs ({len(loras_list)} LoRAs)")
             elif 'loras' in metadata and isinstance(metadata['loras'], list):
-                loras_list = metadata['loras']  # Fall back to regular LoRAs
+                # Simplify regular LoRAs to only include name (as real_name) and weight
+                raw_loras = metadata['loras']
+                for lora in raw_loras:
+                    if isinstance(lora, dict):
+                        simplified_lora = {
+                            'real_name': lora.get('name', ''),
+                            'weight': lora.get('weight', 1.0)
+                        }
+                        loras_list.append(simplified_lora)
+                    else:
+                        # Handle non-dict LoRAs (fallback)
+                        loras_list.append({'real_name': str(lora), 'weight': 1.0})
+                print(f"MetaMan Extract Components: Using simplified regular LoRAs ({len(loras_list)} LoRAs)")
             
             # Format embeddings as a list
             embeddings_list = []
@@ -458,7 +481,7 @@ class MetaManExtractComponents:
                 embeddings_list = metadata['embeddings']  # Return the actual list
             
             print(f"MetaMan Extract Components: Successfully extracted {len([x for x in [positive_prompt, negative_prompt, model_name, vae_name] if x])} text components")
-            print(f"MetaMan Extract Components: Extracted {len(loras_list)} LoRAs and {len(embeddings_list)} embeddings")
+            print(f"MetaMan Extract Components: Extracted {len(loras_list)} simplified LoRAs and {len(embeddings_list)} embeddings")
             
             return (positive_prompt, negative_prompt, steps, cfg_scale, sampler, scheduler, seed, width, height, model_name, vae_name, loras_list, embeddings_list, denoising_strength)
             
